@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Day Before</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Barlow+Condensed:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+</head>
+<body>
+<div id="app">
+  <canvas id="view"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" hidden>
+    <div id="vignette"></div>
+    <div id="hurt"></div>
+
+    <div id="compass"><div id="compass-strip"></div><div id="compass-needle"></div></div>
+    <div id="clock"><span id="clock-time">08:00</span><span id="clock-day">День 1</span></div>
+
+    <section id="objective">
+      <div class="eyebrow">Задача</div>
+      <div id="objective-text">Найди 3 детали рации</div>
+      <div id="objective-sub"></div>
+    </section>
+
+    <canvas id="minimap" width="360" height="360"></canvas>
+
+    <div id="feed"></div>
+
+    <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+    <div id="hitmarker"></div>
+    <div id="prompt" hidden></div>
+    <div id="progress" hidden><div id="progress-fill"></div></div>
+
+    <section id="vitals">
+      <div class="status-row" id="status-row"></div>
+      <div class="bar big"><span class="lbl">HP</span><div class="track"><div class="fill" id="bar-hp"></div></div><span class="num" id="num-hp">100</span></div>
+      <div class="bar thin"><span class="lbl">ВЫН</span><div class="track"><div class="fill" id="bar-stam"></div></div></div>
+      <div class="bar-pair">
+        <div class="bar small"><span class="lbl">ЕДА</span><div class="track"><div class="fill" id="bar-food"></div></div></div>
+        <div class="bar small"><span class="lbl">ВОДА</span><div class="track"><div class="fill" id="bar-water"></div></div></div>
+      </div>
+    </section>
+
+    <section id="weapon-panel">
+      <div id="ammo"><span id="ammo-mag">12</span><span id="ammo-res">/ 24</span></div>
+      <div id="weapon-name">ПМ</div>
+      <div id="slots"></div>
+    </section>
+
+    <div id="counter"><span id="kills">0</span> убито</div>
+  </div>
+
+  <!-- MAIN MENU -->
+  <div id="menu" class="screen">
+    <div class="menu-box">
+      <div class="title-block">
+        <h1>The Day Before</h1>
+        <p class="tag">Город пал три дня назад. Эвакуация ушла без тебя.<br>Собери рацию, вызови вертолёт и продержись до посадки.</p>
+      </div>
+      <div class="menu-actions">
+        <button id="btn-play" class="primary">Начать</button>
+        <button id="btn-settings">Настройки</button>
+        <button id="btn-controls">Управление</button>
+      </div>
+      <div id="record" class="record"></div>
+      <p class="note" id="touch-note" hidden>Нужны клавиатура и мышь. На телефоне игра не управляется.</p>
+    </div>
+  </div>
+
+  <!-- PAUSE -->
+  <div id="pause" class="screen" hidden>
+    <div class="menu-box">
+      <h2>Пауза</h2>
+      <div class="menu-actions">
+        <button id="btn-resume" class="primary">Продолжить</button>
+        <button id="btn-settings2">Настройки</button>
+        <button id="btn-controls2">Управление</button>
+        <button id="btn-restart">Начать заново</button>
+        <button id="btn-quit">В главное меню</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS -->
+  <div id="settings" class="screen" hidden>
+    <div class="menu-box wide">
+      <h2>Настройки</h2>
+      <div class="form">
+        <label for="set-sens">Чувствительность мыши <output id="out-sens"></output></label>
+        <input type="range" id="set-sens" min="0.2" max="3" step="0.05">
+        <label for="set-vol">Громкость <output id="out-vol"></output></label>
+        <input type="range" id="set-vol" min="0" max="1" step="0.05">
+        <label for="set-fov">Поле зрения <output id="out-fov"></output></label>
+        <input type="range" id="set-fov" min="60" max="100" step="1">
+        <label for="set-diff">Сложность</label>
+        <select id="set-diff">
+          <option value="easy">Лёгкая — меньше зомби, слабее укусы</option>
+          <option value="normal">Обычная</option>
+          <option value="hard">Тяжёлая — орда, мало лута</option>
+        </select>
+        <label for="set-shadows">Тени</label>
+        <select id="set-shadows">
+          <option value="high">Высокие</option>
+          <option value="low">Низкие</option>
+          <option value="off">Выключены</option>
+        </select>
+        <label for="set-scale">Разрешение рендера</label>
+        <select id="set-scale">
+          <option value="1">100% — чётко</option>
+          <option value="0.75">75% — быстрее</option>
+          <option value="0.5">50% — для слабых ноутбуков</option>
+        </select>
+        <label class="check"><input type="checkbox" id="set-invert"> Инвертировать ось Y</label>
+      </div>
+      <div class="menu-actions row"><button id="btn-settings-back" class="primary">Готово</button></div>
+    </div>
+  </div>
+
+  <!-- CONTROLS -->
+  <div id="controls" class="screen" hidden>
+    <div class="menu-box wide">
+      <h2>Управление</h2>
+      <dl class="keys">
+        <dt>W A S D</dt><dd>Ходьба</dd>
+        <dt>Мышь</dt><dd>Обзор (стрелки тоже поворачивают)</dd>
+        <dt>Shift</dt><dd>Бег, тратит выносливость</dd>
+        <dt>Пробел</dt><dd>Прыжок — можно залезть на машины</dd>
+        <dt>C / Ctrl</dt><dd>Присесть — тише шаги, зомби замечают позже. Подкрадись сзади — нож убьёт тихо</dd>
+        <dt>ЛКМ</dt><dd>Выстрел / удар ножом</dd>
+        <dt>ПКМ</dt><dd>Прицеливание</dd>
+        <dt>R</dt><dd>Перезарядка</dd>
+        <dt>1–4, колесо</dt><dd>Смена оружия</dd>
+        <dt>E</dt><dd>Обыскать, подобрать, использовать</dd>
+        <dt>F</dt><dd>Фонарик (садится батарейка)</dd>
+        <dt>H</dt><dd>Быстрое лечение</dd>
+        <dt>Tab / I</dt><dd>Инвентарь</dd>
+        <dt>Esc</dt><dd>Пауза</dd>
+      </dl>
+      <p class="note">Стрельба шумит и приманивает зомби. Ночью их больше и появляются бегуны. Укусы вызывают кровотечение — нужен бинт или аптечка.</p>
+      <div class="menu-actions row"><button id="btn-controls-back" class="primary">Понятно</button></div>
+    </div>
+  </div>
+
+  <!-- INVENTORY -->
+  <div id="inventory" class="screen dim" hidden>
+    <div class="inv-box">
+      <header class="inv-head">
+        <h2>Рюкзак</h2>
+        <span id="inv-cap"></span>
+      </header>
+      <div id="inv-grid"></div>
+      <div id="inv-detail">
+        <div id="inv-name">Выбери предмет</div>
+        <div id="inv-desc">ЛКМ — использовать, ПКМ — выбросить.</div>
+      </div>
+      <div class="inv-foot"><span>Tab — закрыть</span><span id="inv-ammo"></span></div>
+    </div>
+  </div>
+
+  <!-- END SCREENS -->
+  <div id="end" class="screen" hidden>
+    <div class="menu-box">
+      <h2 id="end-title">Ты погиб</h2>
+      <p id="end-reason" class="tag"></p>
+      <dl class="stats" id="end-stats"></dl>
+      <div class="menu-actions">
+        <button id="btn-again" class="primary">Ещё раз</button>
+        <button id="btn-end-menu">В главное меню</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="loading" class="screen"><div class="menu-box"><h2>Загрузка…</h2></div></div>
+</div>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
