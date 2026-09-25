@@ -17,11 +17,21 @@ const SKIN = {
   brute: [0x6d7864, 0x5f6a58, 0x74806a],
 };
 
+// Loads a .glb; hosts that can't serve binary models get a JSON glTF copy
+// with the same name plus ".json" (embedded buffers).
+export async function loadModel(loader, url) {
+  try {
+    return await loader.loadAsync(url);
+  } catch (err) {
+    return loader.loadAsync(url + '.json');
+  }
+}
+
 export async function loadZombieModels() {
   const loader = new GLTFLoader();
   const out = [];
   await Promise.all(MODELS.map(async (name) => {
-    const gltf = await loader.loadAsync(BASE + name + '.glb');
+    const gltf = await loadModel(loader, BASE + name + '.glb');
     const scene = gltf.scene;
     const box = new THREE.Box3().setFromObject(scene);
     const h = box.max.y - box.min.y;

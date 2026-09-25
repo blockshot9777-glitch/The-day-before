@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clamp, smooth, pick } from './util.js';
+import { loadModel } from './models.js';
 
 const NATURE = [
   'tree_pineTallA', 'tree_pineTallB', 'tree_pineDefaultA', 'tree_pineRoundA', 'tree_default', 'tree_oak',
@@ -21,7 +22,7 @@ export async function loadNatureModels() {
   const loader = new GLTFLoader();
   const out = {};
   const load = async (name, url) => {
-    const gltf = await loader.loadAsync(url);
+    const gltf = await loadModel(loader, url);
     gltf.scene.updateMatrixWorld(true);
     const parts = [];
     gltf.scene.traverse((o) => {
