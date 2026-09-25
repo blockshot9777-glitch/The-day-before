@@ -17,13 +17,19 @@ const SKIN = {
   brute: [0x6d7864, 0x5f6a58, 0x74806a],
 };
 
-// Loads a .glb; hosts that can't serve binary models get a JSON glTF copy
-// with the same name plus ".json" (embedded buffers).
+// Loads a .glb. Hosts that can't serve binary files get "<name>.glb.json":
+// {"glb": "<base64 of the .glb>"}. It is decoded here and parsed from memory,
+// because such hosts' CSP also blocks fetching data: URIs.
 export async function loadModel(loader, url) {
   try {
     return await loader.loadAsync(url);
-  } catch {
-    return loader.loadAsync(url + '.json');
+  } catch (err) {
+    const res = await fetch(url + '.json');
+    if (!res.ok) throw err;
+    const bin = window.atob((await res.json()).glb);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return loader.parseAsync(bytes.buffer, '');
   }
 }
 
