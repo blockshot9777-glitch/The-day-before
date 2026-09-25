@@ -26,7 +26,6 @@ const PROPS = {
   'props/pallet': 'Environment/glTF/Pallet.gltf',
   'props/barrel': 'Environment/glTF/ExplodingBarrel.gltf',
   'props/gascan': 'Environment/glTF/GasCan.gltf',
-  'props/container': 'Environment/glTF/Container_Small.gltf',
   'props/container-long': 'Environment/glTF/Container_Long.gltf',
   'props/barrier': 'Environment/glTF/Barrier_Single.gltf',
   'props/tires': 'Environment/glTF/Debris_Tires.gltf',

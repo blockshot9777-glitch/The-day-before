@@ -382,7 +382,9 @@ function village(w) {
   const shopH = house(w, 37, 7, 11, 8, 'S', { wall: m.brick, flatRoof: true, h: 3.2, name: 'Сельпо', furniture: ['shelf', 'fridge', 'shelf', 'fridge'], stove: false, shutters: false });
   w.nature.prop('boxes', 40.5, 8.8, 0.3, { y: shopH.base });
   w.nature.prop('trash', 44.5, 1, 0);
-  house(w, 38, 36, 15, 10, 'N', { wall: m.plasterA, h: 3.6, name: 'Клуб', furniture: ['cabinet', 'desk', 'chest'], stove: false, roof: m.roofMetal });
+  for (const [x, z] of [[-4, 30], [30, 30]]) w.nature.prop('streetlight', x, z, Math.PI / 2);
+  const club = house(w, 38, 36, 15, 10, 'N', { wall: m.plasterA, h: 3.6, name: 'Клуб', furniture: ['cabinet', 'desk', 'chest'], stove: false, roof: m.roofMetal });
+  w.nature.prop('sofa', 44.3, 35.5, -Math.PI / 2, { y: club.base }); // along the east wall, clear of the furniture at the back
   // well with a little roof
   const wy = w.ground(6, 34);
   w.addGeo(new THREE.CylinderGeometry(0.9, 0.95, 0.9, 12).translate(6, wy + 0.45, 34), m.logsDark);
@@ -455,6 +457,7 @@ function farm(w) {
   crates(w, 25, -205, 4);
   barrel(w, 30, -200); barrel(w, 31, -201.2);
   w.nature.prop('water-tower', 70, -240, 0.3, { scale: 2.2 });
+  w.nature.prop('container', 22, -228, 1.4, { scale: 1.3 });
   w.nature.prop('tires', 33, -196, 1.1);
   w.nature.prop('pallet', 28, -210, 0.5);
   w.nature.prop('debris', 58, -168, 0.8, { collide: false });
@@ -481,6 +484,7 @@ function gasStation(w) {
   barrel(w, 305, 58); barrel(w, 305.8, 59);
   w.nature.prop('gascan', 303.5, 57, 0.4); w.nature.prop('gascan', 303.9, 58.2, 1.9);
   w.nature.prop('tires', 300, 52, 0.2);
+  for (const z of [51, 69]) w.nature.prop('streetlight', 274, z, -Math.PI / 2);
   w.nature.prop('trash', 304, 78, Math.PI / 2);
   w.nature.prop('boxes', 300.5, 70, 0.3, { y: shop.base });
 }
