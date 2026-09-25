@@ -6,11 +6,13 @@
   "type": "module",
   "scripts": {
     "start": "node tools/serve.mjs",
+    "lint": "eslint js tools tests",
     "test": "node tests/e2e.mjs && node tests/hosted.mjs"
   },
   "devDependencies": {
     "@gltf-transform/core": "4.5.0",
     "@gltf-transform/functions": "4.5.0",
+    "eslint": "10.1.0",
     "playwright": "1.56.1"
   }
 }
