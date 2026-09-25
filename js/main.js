@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { World } from './world.js';
 import { Player } from './player.js';
-import { Weapons, WEAPONS } from './weapons.js';
+import { Weapons, WEAPONS, loadGunModels } from './weapons.js';
 import { Zombies } from './zombies.js';
 import { Effects } from './effects.js';
 import { Input } from './input.js';
@@ -747,6 +747,7 @@ try {
   await Promise.all([
     loadZombieModels().then((m) => { assets.zombies = m; }).catch((err) => console.warn('zombie models unavailable, using simple ones', err)),
     loadNatureModels().then((m) => { assets.nature = m; }).catch((err) => console.warn('nature models unavailable, using simple ones', err)),
+    loadGunModels().then((m) => { assets.guns = m; }).catch((err) => console.warn('gun models unavailable, using simple ones', err)),
   ]);
   window.__game = new Game(assets);
 } catch (err) {

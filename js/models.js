@@ -17,6 +17,17 @@ const SKIN = {
   brute: [0x6d7864, 0x5f6a58, 0x74806a],
 };
 
+// GLTFLoader that reads embedded textures through <img> instead of fetch():
+// strict hosts' CSP (connect-src) blocks fetching the blob: URLs it makes.
+export function gltfLoader() {
+  const loader = new GLTFLoader();
+  loader.register((parser) => {
+    parser.textureLoader = new THREE.TextureLoader(parser.options.manager);
+    return { name: 'img_textures' };
+  });
+  return loader;
+}
+
 // Loads a .glb. Hosts that can't serve binary files get "<name>.glb.json":
 // {"glb": "<base64 of the .glb>"}. It is decoded here and parsed from memory,
 // because such hosts' CSP also blocks fetching data: URIs.
@@ -34,7 +45,7 @@ export async function loadModel(loader, url) {
 }
 
 export async function loadZombieModels() {
-  const loader = new GLTFLoader();
+  const loader = gltfLoader();
   const out = [];
   await Promise.all(MODELS.map(async (name) => {
     const gltf = await loadModel(loader, BASE + name + '.glb');

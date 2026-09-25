@@ -278,9 +278,7 @@ function fence(w, x0, z0, x1, z1, gaps = []) {
 }
 
 function barrel(w, x, z) {
-  const y = w.ground(x, z);
-  w.addGeo(new THREE.CylinderGeometry(0.35, 0.35, 1, 10).translate(x, y + 0.5, z), w.rng() < 0.5 ? w.mats.rust : w.mats.olive);
-  w.addCollider(x - 0.35, y, z - 0.35, x + 0.35, y + 1, z + 0.35).mat = 'metal';
+  w.nature.prop(w.rng() < 0.5 ? 'barrel' : 'barrel-olive', x, z, w.rng() * 6);
 }
 
 function hayBale(w, x, z, rot, y = w.ground(x, z)) {
@@ -294,8 +292,8 @@ function crates(w, x, z, n, kind = 'crate') {
   for (let i = 0; i < n; i++) {
     const px = x + (i % 2) * 1.05, pz = z + Math.floor(i / 2) * 1.05;
     const y = w.ground(px, pz);
-    w.box(px, y, pz, 1, 1, 1, kind === 'military' ? w.mats.olive : w.mats.crate, true, 1);
-    if (w.rng() < 0.6) w.addContainer(px, y + 1, pz, kind);
+    const h = w.nature.prop(kind === 'military' ? 'crate-mil' : 'crate', px, pz, (w.rng() - 0.5) * 0.3, { scale: 1.25 });
+    if (w.rng() < 0.6) w.addContainer(px, y + h, pz, kind);
   }
 }
 
@@ -355,6 +353,13 @@ function village(w) {
       // woodpile under a lean-to
       w.box(sx, sy, sz, 2.6, 1.2, 1, m.logsDark, true, 1);
     }
+    // yard junk next to the shed
+    const jx = sx + (door === 'S' || door === 'N' ? 2.6 : 0), jz = sz + (door === 'E' || door === 'W' ? 2.6 : 0);
+    const junk = r();
+    if (junk < 0.25) w.nature.prop('planks', jx, jz, r() * 6, { collide: false });
+    else if (junk < 0.4) w.nature.prop('tires', jx, jz, r() * 6);
+    else if (junk < 0.55) barrel(w, jx, jz);
+    else if (junk < 0.65) w.nature.prop('pallet', jx, jz, r() * 6);
     if (r() < 0.8) {
       // fruit tree at the back of the yard, never inside the house
       const along = (r() - 0.5) * 12;
@@ -374,7 +379,9 @@ function village(w) {
   w.box(4, cy + 14.4, 7.5, 0.1, 1.4, 0.1, m.gold, false, 0);
   w.box(4, cy + 14.9, 7.5, 0.7, 0.1, 0.1, m.gold, false, 0);
 
-  house(w, 37, 7, 11, 8, 'S', { wall: m.brick, flatRoof: true, h: 3.2, name: 'Сельпо', furniture: ['shelf', 'fridge', 'shelf', 'fridge'], stove: false, shutters: false });
+  const shopH = house(w, 37, 7, 11, 8, 'S', { wall: m.brick, flatRoof: true, h: 3.2, name: 'Сельпо', furniture: ['shelf', 'fridge', 'shelf', 'fridge'], stove: false, shutters: false });
+  w.nature.prop('boxes', 40.5, 8.8, 0.3, { y: shopH.base });
+  w.nature.prop('trash', 44.5, 1, 0);
   house(w, 38, 36, 15, 10, 'N', { wall: m.plasterA, h: 3.6, name: 'Клуб', furniture: ['cabinet', 'desk', 'chest'], stove: false, roof: m.roofMetal });
   // well with a little roof
   const wy = w.ground(6, 34);
@@ -433,9 +440,8 @@ function farm(w) {
   // big barn with a wide opening, hay and a tractor inside
   const barn = house(w, 42, -228, 24, 12, 'E', { wall: m.planksGrey, h: 5.5, doorW: 5, doorH: 4.6, roof: m.roofRust, stove: false, table: false, shutters: false, furniture: ['crate', 'toolbox', 'crate'], name: 'Амбар' });
   for (let i = 0; i < 5; i++) hayBale(w, 36 + i * 2.6, -232 + (i % 2) * 2, 0, barn.base);
-  const ty = barn.base + 0.5;
-  w.box(47, ty, -224, 2, 1.4, 3.4, m.red, true, 1);
-  w.box(47, ty + 1.4, -223.2, 1.6, 1.3, 1.5, m.glass, true, 0);
+  w.nature.prop('pallet', 47, -224, 0.1, { y: barn.base });
+  w.nature.prop('planks', 49.5, -222, 0.4, { y: barn.base + 0.02, collide: false });
   // cow shed and silo
   house(w, 80, -198, 34, 9, 'N', { wall: m.brick, h: 3.2, roof: m.roofMetal, stove: false, table: false, shutters: false, furniture: ['crate', 'crate', 'toolbox'], name: 'Коровник' });
   const sy = w.ground(96, -235);
@@ -448,6 +454,10 @@ function farm(w) {
   for (let i = 0; i < 10; i++) hayBale(w, 120 + r() * 60, -125 + r() * 60, r() * 3);
   crates(w, 25, -205, 4);
   barrel(w, 30, -200); barrel(w, 31, -201.2);
+  w.nature.prop('water-tower', 70, -240, 0.3, { scale: 2.2 });
+  w.nature.prop('tires', 33, -196, 1.1);
+  w.nature.prop('pallet', 28, -210, 0.5);
+  w.nature.prop('debris', 58, -168, 0.8, { collide: false });
   w.nature.wreck(20, -150, 0.3, r);
 }
 
@@ -469,6 +479,10 @@ function gasStation(w) {
   w.nature.wreck(281, 56, 0.1, w.rng);
   w.nature.wreck(290, 70, 1.4, w.rng);
   barrel(w, 305, 58); barrel(w, 305.8, 59);
+  w.nature.prop('gascan', 303.5, 57, 0.4); w.nature.prop('gascan', 303.9, 58.2, 1.9);
+  w.nature.prop('tires', 300, 52, 0.2);
+  w.nature.prop('trash', 304, 78, Math.PI / 2);
+  w.nature.prop('boxes', 300.5, 70, 0.3, { y: shop.base });
 }
 
 function checkpoint(w) {
@@ -477,14 +491,15 @@ function checkpoint(w) {
   w.pois.push({ name: 'Блокпост', x: cx, z: cz });
   for (const dz of [-9, 9]) {
     for (const o of [-3.3, 3.3]) {
-      const x = cx + o, z = cz + dz, y = w.ground(x, z);
-      w.box(x, y, z, 2.8, 0.9, 0.6, m.concrete, true, 1);
+      w.nature.prop('barrier', cx + o - 0.95, cz + dz, 0);
+      w.nature.prop('barrier', cx + o + 0.95, cz + dz, 0);
     }
   }
-  const y = w.ground(cx + 9, cz);
-  w.box(cx + 9, y, cz - 1, 0.9, 1.1, 5, m.sandbag, true, 0);
-  w.box(cx + 11, y, cz + 3, 3.5, 2.6, 3, m.olive, true, 1);
-  w.box(cx - 10, w.ground(cx - 10, cz), cz + 5, 2.6, 2.1, 6, m.olive, true, 2);
+  w.nature.prop('sandbags', cx + 8.5, cz - 1, Math.PI / 2);
+  w.nature.prop('sandbags-small', cx + 8.5, cz + 2.4, Math.PI / 2);
+  w.nature.prop('container-olive', cx + 12, cz + 3, Math.PI / 2);
+  w.nature.prop('container-olive', cx - 10.5, cz + 5, Math.PI / 2 + 0.05);
+  for (const dz of [-12, -11.2, 11.2, 12]) w.nature.prop('cone', cx + (dz > 0 ? 1.5 : -1.5), cz + dz, dz);
   crates(w, cx - 9, cz - 6, 4, 'military');
   for (let i = 0; i < 5; i++) w.box(cx + (w.rng() - 0.5) * 12, w.ground(cx, cz) + 0.07, cz + (w.rng() - 0.5) * 16, 1 + w.rng(), 0.012, 1 + w.rng(), m.blood, false, 0);
   w.nature.wreck(cx - 2, cz - 25, 0.05, w.rng);
@@ -502,23 +517,25 @@ function armyCamp(w) {
   w.box(cx + 2.5, gy + 0.14, cz, 1, 0.01, 7, m.yellow, false, 0);
   w.box(cx, gy + 0.14, cz, 4, 0.01, 1, m.yellow, false, 0);
   w.addGeo(new THREE.RingGeometry(7.5, 8.2, 40).rotateX(-Math.PI / 2).translate(cx, gy + 0.155, cz), m.yellow);
-  for (let a = 0; a < Math.PI * 2; a += Math.PI / 14) {
+  // sandbag wall around the pad, each run laid along the circle
+  for (let a = 0; a < Math.PI * 2; a += Math.PI / 20) {
     if (Math.abs(Math.cos(a) - 1) < 0.25) continue; // gap toward the road (east)
     const x = cx + Math.cos(a) * 16, z = cz + Math.sin(a) * 16;
-    w.box(x, w.ground(x, z) - 0.1, z, 1.7, 1.2, 1.7, m.sandbag, true, 0);
+    w.nature.prop('sandbags-small', x, z, -a - Math.PI / 2, { y: w.ground(x, z) - 0.1 });
   }
-  for (const [x, z, sw, sd] of [[cx - 22, cz - 16, 6, 4], [cx + 18, cz - 22, 4, 6], [cx - 24, cz + 12, 6, 4]]) {
-    const y = w.ground(x, z);
-    w.box(x, y, z, sw, 2.6, sd, m.olive, true, 2);
-    gableRoof(w, x, y + 2.6, z, sw, sd, 1, 0.2, m.olive, m.olive);
+  // A-frame army tents
+  for (const [x, z, sw, sd] of [[cx - 22, cz - 16, 7, 4.5], [cx + 18, cz - 22, 4.5, 7], [cx - 24, cz + 12, 7, 4.5]]) {
+    const { top } = footprint(w, x, z, sw, sd);
+    gableRoof(w, x, top - 0.1, z, sw, sd, 2.7, 0.05, m.olive, m.olive);
   }
   crates(w, cx - 16, cz - 12, 3, 'military');
   crates(w, cx + 14, cz - 16, 2, 'military');
   crates(w, cx - 18, cz + 18, 3, 'military');
-  const ty = w.ground(cx + 17, cz + 15);
-  w.box(cx + 17, ty + 0.5, cz + 15, 2.4, 1.4, 6, m.olive, true, 2);
-  w.box(cx + 17, ty + 1.9, cz + 13, 2.4, 1.2, 1.8, m.olive, true, 2);
-  w.addContainer(cx + 17, ty + 1.9, cz + 18, 'trunk');
+  w.nature.prop('container-olive', cx + 18, cz + 15, Math.PI / 2 + 0.03, { scale: 1.3 });
+  w.nature.prop('pallet', cx + 14.5, cz + 19, 0.2);
+  const gh = w.nature.prop('crate-mil', cx + 14.5, cz + 19, 0.1, { y: w.ground(cx + 14.5, cz + 19) + 0.19, scale: 1.25 });
+  w.addContainer(cx + 14.5, w.ground(cx + 14.5, cz + 19) + 0.19 + gh, cz + 19, 'military');
+  for (const [x, z] of [[cx - 13, cz + 20], [cx - 12.2, cz + 20.6], [cx + 20, cz - 14]]) w.nature.prop('gascan', x, z, w.rng() * 6);
 }
 
 function pioneerCamp(w) {
@@ -560,8 +577,9 @@ function radioTower(w) {
   w.beacon.position.set(cx, y + H + 4.2, cz);
   w.scene.add(w.beacon);
   house(w, cx + 10, cz - 4, 6, 5, 'E', { wall: m.concrete, flatRoof: true, furniture: ['console'], stove: false, table: false, shutters: false, name: 'Аппаратная' });
-  w.box(cx - 6, w.ground(cx - 6, cz + 5), cz + 5, 2.2, 1.3, 1.2, m.olive, true, 1);
-  w.addContainer(cx - 6, w.ground(cx - 6, cz + 5) + 1.3, cz + 5, 'military');
+  const ch = w.nature.prop('crate-mil', cx - 6, cz + 5, 0.2, { scale: 1.4 });
+  w.addContainer(cx - 6, w.ground(cx - 6, cz + 5) + ch, cz + 5, 'military');
+  w.nature.prop('gascan', cx - 4.6, cz + 5.4, 1.2);
   barrel(w, cx - 4, cz - 6);
 }
 

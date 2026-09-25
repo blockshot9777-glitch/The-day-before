@@ -37,9 +37,13 @@ try {
     const g = window.__game;
     let skinned = 0;
     g.zombies.spawn('walker', 140, 22, 'idle').mesh.traverse((o) => { if (o.isSkinnedMesh) skinned++; });
-    return { zombies: (g.assets.zombies || []).length, nature: Object.keys(g.assets.nature || {}).length, skinned };
+    // the AK's textures are embedded in its file: they must decode too
+    let texW = 0;
+    g.weapons.models.rifle.traverse((o) => { if (o.isMesh && o.material.map && o.material.map.image) texW = Math.max(texW, o.material.map.image.width || 0); });
+    return { zombies: (g.assets.zombies || []).length, nature: Object.keys(g.assets.nature || {}).length, guns: Object.keys(g.assets.guns || {}).length, skinned, texW };
   });
-  ok = s.zombies === 4 && s.nature === 16 && s.skinned > 0 && warnings.length === 0;
+  // 15 nature models + the sedan + 20 prop variants
+  ok = s.zombies === 4 && s.nature === 36 && s.guns === 4 && s.skinned > 0 && s.texW > 0 && warnings.length === 0;
   console.log(`${ok ? 'PASS' : 'FAIL'} models load on a strict static host ${JSON.stringify(s)}${warnings.length ? '\n  ' + warnings.join('\n  ') : ''}`);
 } catch (err) {
   console.log('EXCEPTION ' + err.message);

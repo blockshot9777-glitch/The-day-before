@@ -1,6 +1,66 @@
 // Weapons: stats, first-person view models, firing, reloading and switching.
 import * as THREE from 'three';
 import { clamp, lerp } from './util.js';
+import { loadModel, gltfLoader } from './models.js';
+
+// Gun models (see assets/models/CREDITS.md) fitted into the same frame as the
+// old box models: barrel along -Z, muzzle at `muzzleZ`, top of the sights at
+// `top`, `len` metres long. `rot` turns the file's own axes into that frame.
+const GUN_MODELS = {
+  knife: { file: 'knife.glb', len: 0.3, muzzleZ: -0.32, top: 0.03, rot: [0, -Math.PI / 2, Math.PI / 2] },
+  pistol: { file: 'pistol.glb', len: 0.2, muzzleZ: -0.165, top: 0.064, rot: [0, -Math.PI / 2, 0] },
+  shotgun: { file: 'shotgun.glb', len: 0.95, muzzleZ: -0.63, top: 0.066, rot: [0, Math.PI / 2, 0] },
+  rifle: { file: 'ak47.glb', len: 0.8, muzzleZ: -0.49, top: 0.094, rot: [0, 0, 0], pose: 'idle' },
+};
+
+export async function loadGunModels() {
+  const loader = gltfLoader();
+  const out = {};
+  await Promise.all(Object.entries(GUN_MODELS).map(async ([id, cfg]) => {
+    const gltf = await loadModel(loader, 'assets/models/weapons/' + cfg.file);
+    out[id] = { scene: gltf.scene, clips: gltf.animations };
+  }));
+  return out;
+}
+
+// Wraps a loaded gun so it sits where the box model did.
+function fitGun(id, src) {
+  const cfg = GUN_MODELS[id];
+  const inner = src.scene;
+  if (cfg.pose) {
+    // skinned model: freeze it in the first frame of a clip (its bind pose leaves the magazine off)
+    const clip = src.clips.find((c) => c.name.endsWith(cfg.pose));
+    if (clip) {
+      const mixer = new THREE.AnimationMixer(inner);
+      mixer.clipAction(clip).play();
+      mixer.update(0);
+    }
+  }
+  const pivot = new THREE.Group();
+  pivot.rotation.set(...cfg.rot);
+  pivot.add(inner);
+  const holder = new THREE.Group();
+  holder.add(pivot);
+  holder.updateMatrixWorld(true);
+  let box = new THREE.Box3().setFromObject(holder);
+  const k = cfg.len / (box.max.z - box.min.z);
+  pivot.scale.setScalar(k);
+  holder.updateMatrixWorld(true);
+  box = new THREE.Box3().setFromObject(holder);
+  pivot.position.set(-(box.min.x + box.max.x) / 2, cfg.top - box.max.y, cfg.muzzleZ - box.min.z);
+  inner.traverse((o) => {
+    if (!o.isMesh) return;
+    o.frustumCulled = false;
+    o.castShadow = false;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (m.metalness > 0.6) m.metalness = 0.6; // no env map here: full metal renders black
+      if (m.roughness < 0.35) m.roughness = 0.35;
+    }
+  });
+  holder.userData.slide = inner.getObjectByName('Slide') || null;
+  if (holder.userData.slide) holder.userData.slideRest = holder.userData.slide.position.clone();
+  return holder;
+}
 
 export const WEAPONS = {
   knife: { name: 'Нож', slot: 1, melee: true, damage: 45, range: 2.3, rate: 0.5, tire: 2.5, hold: 0 },
@@ -26,7 +86,7 @@ function part(group, geo, material, x, y, z, rx = 0, ry = 0, rz = 0) {
   return m;
 }
 
-function buildModels() {
+function buildModels(guns = {}) {
   const steel = mat(0x5a5f64);
   const dark = mat(0x34373b);
   const wood = mat(0x6b4526, { metalness: 0.05, roughness: 0.8 });
@@ -36,47 +96,62 @@ function buildModels() {
   const B = (w, h, d) => new THREE.BoxGeometry(w, h, d);
   const C = (r, l) => new THREE.CylinderGeometry(r, r, l, 10).rotateX(Math.PI / 2);
 
-  const hand = (g, x, y, z) => {
-    part(g, B(0.075, 0.085, 0.1), skin, x, y, z);
-    part(g, B(0.09, 0.09, 0.26), sleeve, x + 0.03, y - 0.06, z + 0.17, 0.35);
+  const glove = mat(0x2b2a27, { metalness: 0, roughness: 0.85 });
+  // gloved fist around the grip, forearm in a sleeve going back and down out of view
+  const hand = (g, x, y, z, fore = false) => {
+    const fist = part(g, new THREE.CapsuleGeometry(0.036, 0.05, 4, 10), glove, x, y, z, fore ? Math.PI / 2 : 0.35);
+    fist.scale.set(1.05, 1, fore ? 1.15 : 1);
+    part(g, new THREE.CapsuleGeometry(0.03, 0.04, 4, 10), skin, x + 0.004, y - 0.05, z + 0.06, 1.2);
+    part(g, new THREE.CylinderGeometry(0.047, 0.056, 0.34, 12).rotateX(Math.PI / 2), sleeve, x + 0.035, y - 0.09, z + 0.22, 0.4);
   };
 
   const models = {};
   let g = new THREE.Group();
-  part(g, B(0.03, 0.035, 0.12), dark, 0, 0, 0);
-  part(g, B(0.012, 0.04, 0.22), blade, 0, 0.005, -0.17);
-  part(g, B(0.05, 0.05, 0.015), steel, 0, 0, -0.065);
-  hand(g, 0, -0.01, 0.02);
+  if (guns.knife) g.add(fitGun('knife', guns.knife));
+  else {
+    part(g, B(0.03, 0.035, 0.12), dark, 0, 0, 0);
+    part(g, B(0.012, 0.04, 0.22), blade, 0, 0.005, -0.17);
+    part(g, B(0.05, 0.05, 0.015), steel, 0, 0, -0.065);
+  }
+  hand(g, 0, -0.005, -0.045);
   g.userData.muzzle = new THREE.Vector3(0, 0, -0.3);
   g.userData.hip = new THREE.Vector3(0.22, -0.2, -0.4);
   models.knife = g;
 
   g = new THREE.Group();
-  part(g, B(0.04, 0.045, 0.19), steel, 0, 0.03, -0.05);
+  if (guns.pistol) g.add(fitGun('pistol', guns.pistol));
+  else part(g, B(0.04, 0.045, 0.19), steel, 0, 0.03, -0.05);
+  if (!guns.pistol) {
   part(g, B(0.036, 0.1, 0.05), dark, 0, -0.035, 0.02, 0.25);
   part(g, B(0.008, 0.012, 0.01), dark, 0, 0.058, -0.13);
   part(g, B(0.03, 0.01, 0.01), dark, 0, 0.058, 0.03);
-  hand(g, 0, -0.05, 0.05);
-  g.userData.muzzle = new THREE.Vector3(0, 0.03, -0.16);
+  }
+  hand(g, 0, -0.045, 0.028);
+  g.userData.muzzle = new THREE.Vector3(0, 0.03, -0.17);
   g.userData.ads = new THREE.Vector3(0, -0.058, -0.34);
   g.userData.hip = new THREE.Vector3(0.2, -0.19, -0.44);
   models.pistol = g;
 
   g = new THREE.Group();
+  if (guns.shotgun) g.add(fitGun('shotgun', guns.shotgun));
+  else {
   part(g, C(0.022, 0.62), steel, 0, 0.03, -0.3);
   part(g, C(0.02, 0.55), steel, 0, 0.0, -0.27);
   part(g, B(0.06, 0.06, 0.16), wood, 0, -0.01, -0.3);
   part(g, B(0.05, 0.07, 0.18), dark, 0, 0.01, -0.02);
   part(g, B(0.05, 0.11, 0.3), wood, 0, -0.05, 0.18, 0.18);
   part(g, B(0.01, 0.015, 0.01), blade, 0, 0.058, -0.58);
-  hand(g, 0, -0.06, -0.3);
-  hand(g, 0.01, -0.06, 0.05);
-  g.userData.muzzle = new THREE.Vector3(0, 0.03, -0.62);
+  }
+  hand(g, 0, -0.035, -0.24, true);
+  hand(g, 0.004, -0.045, 0.03);
+  g.userData.muzzle = new THREE.Vector3(0, 0.042, -0.64);
   g.userData.ads = new THREE.Vector3(0, -0.06, -0.52);
   g.userData.hip = new THREE.Vector3(0.2, -0.21, -0.56);
   models.shotgun = g;
 
   g = new THREE.Group();
+  if (guns.rifle) g.add(fitGun('rifle', guns.rifle));
+  else {
   part(g, B(0.055, 0.075, 0.34), steel, 0, 0.01, -0.1);
   part(g, B(0.05, 0.03, 0.3), dark, 0, 0.06, -0.1);
   part(g, C(0.016, 0.22), dark, 0, 0.025, -0.36);
@@ -85,9 +160,10 @@ function buildModels() {
   part(g, B(0.035, 0.1, 0.05), dark, 0, -0.06, 0.03, -0.2);
   part(g, B(0.02, 0.04, 0.22), steel, 0, 0.0, 0.17);
   part(g, B(0.012, 0.02, 0.012), dark, 0, 0.085, -0.22);
-  hand(g, 0, -0.05, -0.28);
-  hand(g, 0.01, -0.08, 0.04);
-  g.userData.muzzle = new THREE.Vector3(0, 0.025, -0.48);
+  }
+  hand(g, 0, 0.012, -0.25, true);
+  hand(g, 0.004, -0.035, -0.012);
+  g.userData.muzzle = new THREE.Vector3(0, 0.053, -0.5);
   g.userData.ads = new THREE.Vector3(0, -0.085, -0.46);
   g.userData.hip = new THREE.Vector3(0.19, -0.2, -0.5);
   models.rifle = g;
@@ -107,7 +183,7 @@ export class Weapons {
     this.scene.add(this.ambient, this.light);
     this.rig = new THREE.Group();
     this.scene.add(this.rig);
-    this.models = buildModels();
+    this.models = buildModels(game.assets && game.assets.guns);
     for (const m of Object.values(this.models)) { m.visible = false; this.rig.add(m); }
 
     const flashTex = (() => {
