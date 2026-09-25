@@ -280,6 +280,24 @@ try {
   await tick(6);
   s = await ev(() => window.__game.weapons.fatigue);
   check('lowered weapon lets the arms recover', s < 5, s.toFixed(1));
+  // animated zombie models: loaded, skinned, clip follows the AI state
+  s = await ev(() => {
+    const g = window.__game, Z = g.zombies;
+    const models = (g.assets.zombies || []).map((m) => m.name);
+    const z = Z.spawn('walker', g.player.pos.x + 6, g.player.pos.z, 'chase');
+    let skinned = 0;
+    z.mesh.traverse((o) => { if (o.isSkinnedMesh) skinned++; });
+    const clips = [];
+    g.tick(1 / 60, 30); clips.push(z.visual.currentName);
+    z.windup = 0.4; z.visual.update(1 / 60, z); clips.push(z.visual.currentName);
+    z.windup = 0; Z.kill(z, { x: 1, y: 0, z: 0 }); g.tick(1 / 60, 30); clips.push(z.visual.currentName);
+    const b = Z.spawn('brute', g.player.pos.x + 8, g.player.pos.z, 'idle');
+    return { models, skinned, clips, bruteModel: b.visual && b.mesh.children.length > 0 };
+  });
+  check('zombie models load (4 characters)', s.models.length === 4, JSON.stringify(s.models));
+  check('zombie is a skinned animated character', s.skinned > 0, JSON.stringify(s));
+  check('clip follows AI: chase -> walk/run, windup -> attack, killed -> death', ['walk', 'run'].includes(s.clips[0]) && /^attack/.test(s.clips[1]) && s.clips[2] === 'death', JSON.stringify(s.clips));
+  await clearZ();
   // sound: every recorded clip decodes, and game events play the right samples
   s = await page.evaluate(async () => {
     const a = window.__game.audio;

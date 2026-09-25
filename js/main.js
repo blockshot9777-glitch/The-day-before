@@ -7,6 +7,7 @@ import { Zombies } from './zombies.js';
 import { Effects } from './effects.js';
 import { Input } from './input.js';
 import { Audio } from './audio.js';
+import { loadZombieModels } from './models.js';
 import { UI } from './ui.js';
 import { Inventory, ITEMS } from './items.js';
 import { storage, fmtTime, clamp } from './util.js';
@@ -25,7 +26,8 @@ const DEFAULT_SETTINGS = { sens: 1, vol: 0.7, fov: 75, diff: 'normal', shadows: 
 const $ = (id) => document.getElementById(id);
 
 class Game {
-  constructor() {
+  constructor(assets = {}) {
+    this.assets = assets;
     this.canvas = $('view');
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
     this.renderer.autoClear = false;
@@ -710,7 +712,14 @@ class Game {
 }
 
 try {
-  window.__game = new Game();
+  // models load before the first town is built; the game still runs without them
+  let assets = {};
+  try {
+    assets.zombies = await loadZombieModels();
+  } catch (err) {
+    console.warn('zombie models unavailable, using simple ones', err);
+  }
+  window.__game = new Game(assets);
 } catch (err) {
   console.error(err);
   const l = document.getElementById('loading');

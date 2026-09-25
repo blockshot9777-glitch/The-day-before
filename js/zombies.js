@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { lerp, rayAABB, angleDiff, pick, weighted } from './util.js';
 import { rollLoot } from './items.js';
 import { HALF } from './world.js';
+import { ZombieVisual } from './models.js';
 
 const TYPES = {
   walker: { hp: 70, speed: [1.2, 1.8], chase: [2.4, 3.1], dmg: 12, scale: 1, bleed: 0.3, skin: 0x7d8a6e, score: 1 },
@@ -83,7 +84,15 @@ export class Zombies {
   spawn(type, x, z, state = 'idle') {
     const t = TYPES[type];
     const diff = this.game.diff;
-    const mesh = this.makeMesh(type);
+    // animated character if the models loaded, blocky fallback otherwise
+    const models = this.game.assets && this.game.assets.zombies;
+    let visual = null;
+    if (models && models.length) {
+      // brutes are the bulky men, runners any build
+      const pool = type === 'brute' ? models.filter((m) => m.name !== 'casual-woman') : models;
+      visual = new ZombieVisual(pick(pool), type, t.scale);
+    }
+    const mesh = visual ? visual.group : this.makeMesh(type);
     mesh.position.set(x, 0, z);
     this.group.add(mesh);
     const zb = {
@@ -92,7 +101,7 @@ export class Zombies {
       walk: lerp(t.speed[0], t.speed[1], Math.random()), run: lerp(t.chase[0], t.chase[1], Math.random()),
       phase: Math.random() * 10, senseT: Math.random() * 0.3, attackT: 0, windup: 0, stagger: 0,
       memory: 0, wanderT: 0, stuckT: 0, detourT: 0, detourDir: 1, dead: false, deadT: 0, speedNow: 0,
-      scale: t.scale,
+      scale: t.scale, visual,
     };
     if (state === 'chase') { zb.memory = 20; zb.target.copy(this.game.player.pos); }
     this.list.push(zb);
@@ -392,12 +401,17 @@ export class Zombies {
         const want = Math.atan2(faceX, faceZ);
         z.yaw += angleDiff(want, z.yaw) * Math.min(1, dt * 8);
       }
-      z.mesh.rotation.y = z.yaw + Math.PI;
+      // the animated models face +Z, the blocky fallback faces -Z
+      z.mesh.rotation.y = z.yaw + (z.visual ? 0 : Math.PI);
       this.animate(z, dt);
     }
   }
 
   animate(z, dt) {
+    if (z.visual) {
+      z.visual.update(dt, z);
+      return;
+    }
     const u = z.mesh.userData;
     z.phase += dt * (1.5 + z.speedNow * 1.9);
     const s = Math.sin(z.phase);
@@ -416,8 +430,11 @@ export class Zombies {
 
   animateDeath(z, dt, i) {
     z.deadT += dt;
-    const k = Math.min(1, z.deadT / 0.55);
-    z.mesh.rotation.x = -k * k * Math.PI / 2 * 0.95;
+    if (z.visual) z.visual.update(dt, z);
+    else {
+      const k = Math.min(1, z.deadT / 0.55);
+      z.mesh.rotation.x = -k * k * Math.PI / 2 * 0.95;
+    }
     z.mesh.position.y = z.baseY - (z.deadT > 20 ? (z.deadT - 20) * 0.3 : 0);
     if (z.deadT > 26) {
       this.group.remove(z.mesh);
