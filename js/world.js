@@ -662,6 +662,9 @@ export class World {
     const s = this.scene;
     this.hemi = new THREE.HemisphereLight(0xbfd0dc, 0x3a3326, 1);
     s.add(this.hemi);
+    // Roofs block the sun completely (no GI), so rooms need their own fill.
+    this.roomLight = new THREE.PointLight(0xffe6c4, 0, 16, 1.2);
+    s.add(this.roomLight);
     this.sun = new THREE.DirectionalLight(0xffffff, 2.5);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -721,6 +724,10 @@ export class World {
     this.hemi.color.setRGB(lerp(0.35, 0.75, dayF), lerp(0.42, 0.8, dayF), lerp(0.62, 0.86, dayF));
     this.stars.material.opacity = clamp(1 - dayF * 1.6, 0, 1);
     this.stars.position.set(center.x, 0, center.z);
+    const indoors = this.insideBuilding(center.x, center.z);
+    const inRoom = indoors && indoors.enterable && center.y >= indoors.floor - 0.3 && center.y < indoors.floor + 2.4;
+    this.roomLight.position.set(center.x, (inRoom ? indoors.floor : cy) + 2.05, center.z);
+    this.roomLight.intensity = inRoom ? 8 : 0;
     this.mats.glassLit.emissiveIntensity = lerp(1.4, 0, dayF);
 
     if (this.beacon) {

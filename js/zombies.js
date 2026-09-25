@@ -204,7 +204,7 @@ export class Zombies {
   targetCount() {
     const g = this.game;
     const night = 1 - g.dayF;
-    let n = g.diff.zCount * (1 + night * 1.1) + Math.min(10, g.day * 2);
+    let n = g.diff.zCount * (1 + night * 0.6) + Math.min(3, g.day);
     return Math.round(n + this.hordeTarget);
   }
 

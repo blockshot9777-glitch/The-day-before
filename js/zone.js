@@ -250,7 +250,20 @@ function house(w, cx, cz, W, D, door, o = {}) {
     w.box(kx, base + 1.8, kz, 0.6, H + 2.2 - 1.8, 0.6, m.brick, false, 1);
   }
   if (o.table !== false && W > 6 && D > 5.5) w.box(cx, base, cz, 1.3, 0.75, 0.85, m.wood, true, 1);
+  if (o.stove !== false && W > 6.5 && D > 6) dressHome(w, { minX, maxX, cx, cz, base });
   return { base, door: b.door, containers: made, building: b };
+}
+
+// Bed and rug in a lived-in house. Kept on the side wall so the door, the
+// centre table and the back-wall loot stay reachable.
+function dressHome(w, { minX, cx, cz, base }) {
+  const m = w.mats;
+  w.box(cx, base + 0.02, cz, 2.2, 0.02, 1.5, m.red, false, 1);
+  const bx = minX + 0.72;
+  if (bx > cx - 1.4) return;
+  w.box(bx, base, cz - 0.2, 0.95, 0.4, 1.85, m.darkWood, true, 1);
+  w.box(bx, base + 0.4, cz - 0.15, 0.88, 0.1, 1.65, m.planksOchre, false, 1);
+  w.box(bx, base + 0.5, cz - 0.85, 0.62, 0.08, 0.32, m.white, false, 1);
 }
 
 // Straight fence along X or Z with optional gaps (gates), alpha-tested pickets.

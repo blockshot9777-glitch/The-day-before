@@ -18,9 +18,9 @@ const HOLD_SECONDS = 120; // survive this long after calling the evac
 const SEARCH_TIME = 1.2;
 
 const DIFFICULTY = {
-  easy: { zCount: 7, zDmg: 0.6, zHp: 0.85, loot: 1.35, drain: 0.7, horde: 8 },
-  normal: { zCount: 11, zDmg: 1, zHp: 1, loot: 1, drain: 1, horde: 12 },
-  hard: { zCount: 17, zDmg: 1.4, zHp: 1.2, loot: 0.7, drain: 1.3, horde: 18 },
+  easy: { zCount: 2, zDmg: 0.6, zHp: 0.85, loot: 1.35, drain: 0.7, horde: 8 },
+  normal: { zCount: 4, zDmg: 1, zHp: 1, loot: 1, drain: 1, horde: 12 },
+  hard: { zCount: 7, zDmg: 1.4, zHp: 1.2, loot: 0.7, drain: 1.3, horde: 18 },
 };
 
 const DEFAULT_SETTINGS = { sens: 1, vol: 0.7, fov: 75, diff: 'normal', shadows: 'high', scale: 1, invert: false };
