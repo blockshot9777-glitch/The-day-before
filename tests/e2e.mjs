@@ -280,6 +280,47 @@ try {
   await tick(6);
   s = await ev(() => window.__game.weapons.fatigue);
   check('lowered weapon lets the arms recover', s < 5, s.toFixed(1));
+  // sound: every recorded clip decodes, and game events play the right samples
+  s = await page.evaluate(async () => {
+    const a = window.__game.audio;
+    for (let i = 0; i < 100 && !a.loaded; i++) await new Promise((r) => setTimeout(r, 100));
+    const names = await (await fetch('assets/audio/manifest.json')).json();
+    return { loaded: a.loaded, decoded: a.buffers.size, total: names.length, state: a.ctx && a.ctx.state, missing: names.filter((n) => !a.buffers.has(n)) };
+  });
+  check('all audio clips decode', s.loaded && s.decoded === s.total && s.total > 60, JSON.stringify(s));
+  s = await ev(() => {
+    const g = window.__game, a = g.audio, w = g.weapons;
+    const heard = (fn) => { a.played.length = 0; fn(); return [...a.played]; };
+    const out = {};
+    w.current = 'pistol'; w.show('pistol'); w.mags.pistol = 5; w.cooldown = 0; w.reloading = 0;
+    out.shot = heard(() => w.fire());
+    out.reload = heard(() => { g.inventory.add('ammo_pistol', 12); w.startReload(); g.tick(1 / 60, 90); });
+    out.dry = heard(() => a.empty('rifle'));
+    const house = g.world.buildings.find((b) => b.enterable);
+    const floor = g.world.surfaceAt((house.minX + house.maxX) / 2, 0.12, (house.minZ + house.maxZ) / 2);
+    out.stepWood = heard(() => a.step(false, floor));
+    const z = g.zombies.spawn('walker', g.player.pos.x + 3, g.player.pos.z, 'idle');
+    out.death = heard(() => g.zombies.kill(z, { x: 1, y: 0, z: 0 }));
+    out.surface = [g.world.surfaceAt(0, 0, 0), g.world.surfaceAt(30, 0, 30)];
+    return out;
+  });
+  check('pistol shot plays close + distant layers', s.shot.includes('pistol_shot') && s.shot.includes('pistol_shot_far'), JSON.stringify(s.shot));
+  check('tactical reload: mag out, mag in, no slide', s.reload.join() === 'pistol_mag_out,pistol_mag_in', JSON.stringify(s.reload));
+  check('dry fire, footsteps and zombie death sounds', s.dry[0] === 'rifle_dry' && s.stepWood[0] === 'step_wood' && s.death[0] === 'zombie_death', JSON.stringify(s));
+  check('road sounds hard, lawn sounds like grass', s.surface[0] === 'hard' && s.surface[1] !== 'hard', JSON.stringify(s.surface));
+  s = await ev(() => {
+    const g = window.__game, w = g.weapons, a = g.audio;
+    w.owned.shotgun = true; w.current = 'shotgun'; w.show('shotgun'); w.reloading = 0; w.switchT = 0; w.mags.shotgun = 3;
+    g.inventory.add('ammo_shells', 10);
+    const before = g.inventory.count('ammo_shells');
+    a.played.length = 0;
+    w.startReload();
+    g.tick(1 / 60, 45); // ~1 shell
+    const mid = w.mags.shotgun;
+    g.tick(1 / 60, 200);
+    return { mid, end: w.mags.shotgun, used: before - g.inventory.count('ammo_shells'), sounds: [...a.played] };
+  });
+  check('shotgun reloads shell by shell, pumps at the end', s.mid === 4 && s.end === 6 && s.used === 3 && s.sounds.filter((x) => x === 'shotgun_shell').length === 3 && s.sounds.at(-1) === 'shotgun_pump', JSON.stringify(s));
   // settings persistence
   await page.keyboard.press('Escape');
   await page.click('#btn-settings2');

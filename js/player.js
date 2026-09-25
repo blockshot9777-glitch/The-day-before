@@ -189,7 +189,7 @@ export class Player {
       const stride = this.sprinting ? 2.4 : 1.8;
       if (this.stepAcc > stride) {
         this.stepAcc = 0;
-        g.audio.step(this.crouching);
+        g.audio.step(this.crouching, this.world.surfaceAt(this.pos.x, this.pos.y, this.pos.z));
         if (this.sprinting) g.noise(this.pos, 14);
         else if (!this.crouching) g.noise(this.pos, 5);
       }

@@ -219,8 +219,28 @@ export class World {
   // Box centred on x/z with its bottom at y. Returns the collider (if any).
   box(x, y, z, w, h, d, mat, collide = true, tile = 2) {
     this.addGeo(boxGeo(w, h, d, tile).translate(x, y + h / 2, z), mat);
-    if (collide) return this.addCollider(x - w / 2, y, z - d / 2, x + w / 2, y + h, z + d / 2);
-    return null;
+    if (!collide) return null;
+    const c = this.addCollider(x - w / 2, y, z - d / 2, x + w / 2, y + h, z + d / 2);
+    c.mat = this.soundMat(mat);
+    return c;
+  }
+
+  // What a bullet hitting this material sounds like.
+  soundMat(mat) {
+    const m = this.mats;
+    if ([m.carRed, m.carBlue, m.carWhite, m.carGreen, m.rust, m.metal, m.tire, m.olive].includes(mat)) return 'metal';
+    if ([m.wood, m.darkWood, m.crate].includes(mat)) return 'wood';
+    return 'hard';
+  }
+
+  // Ground type under a point, for footstep sounds.
+  surfaceAt(x, y, z) {
+    const b = this.insideBuilding(x, z);
+    if (b && b.enterable && y >= 0.05) return 'wood';
+    if (b) return 'hard';
+    if (this.onRoad(x, z, 2.5)) return 'hard';
+    if (this.helipad && Math.abs(x - this.helipad.x) < 11 && Math.abs(z - this.helipad.z) < 11) return 'hard';
+    return 'grass';
   }
 
   addCollider(minX, minY, minZ, maxX, maxY, maxZ) {
@@ -305,8 +325,10 @@ export class World {
   }
 
   // Distance along a ray to the first solid surface (colliders + ground).
+  // The collider that was hit is left in this.lastHit (null for the ground).
   raycast(o, d, maxT = 200) {
     let best = maxT;
+    this.lastHit = null;
     if (d.y < -1e-6) best = Math.min(best, -o.y / d.y);
     // Walk the grid cells the ray passes through (coarse: sample along the ray).
     const s = ++this.stamp;
@@ -322,7 +344,7 @@ export class World {
             if (c._s === s) continue;
             c._s = s;
             const h = rayAABB(o.x, o.y, o.z, d.x, d.y, d.z, c, best);
-            if (h < best) best = h;
+            if (h < best) { best = h; this.lastHit = c; }
           }
         }
       }

@@ -99,6 +99,15 @@ export class Zombies {
     return zb;
   }
 
+  // Voice position and pitch: brutes are deeper, runners shriller.
+  mouth(z) {
+    return { x: z.pos.x, y: z.pos.y + 1.65 * z.scale, z: z.pos.z };
+  }
+
+  pitch(z) {
+    return (z.type === 'brute' ? 0.72 : z.type === 'runner' ? 1.18 : 1) * (z.voice || (z.voice = 0.92 + Math.random() * 0.16));
+  }
+
   alive() {
     return this.list.filter((z) => !z.dead);
   }
@@ -149,6 +158,7 @@ export class Zombies {
   }
 
   kill(z, dir) {
+    this.game.audio.zombie('death', this.mouth(z), this.pitch(z));
     const g = this.game;
     z.dead = true;
     z.deadT = 0;
@@ -232,11 +242,7 @@ export class Zombies {
         const d = z.pos.distanceTo(ppos);
         if (d < nd && Math.random() < 0.6) { nd = d; near = z; }
       }
-      if (near) {
-        const ang = Math.atan2(near.pos.x - ppos.x, near.pos.z - ppos.z);
-        const pan = Math.sin(angleDiff(ang, player.yaw + Math.PI)) * -1;
-        g.audio.groan(nd, pan, near.type === 'brute' ? 0.6 : near.type === 'runner' ? 1.4 : 1);
-      }
+      if (near) g.audio.zombie('groan', this.mouth(near), this.pitch(near));
     }
 
     const eye = player.eyePos(this._v);
@@ -271,7 +277,7 @@ export class Zombies {
           sees = world.lineOfSight(head, eye);
         }
         if (sees) {
-          if (z.state !== 'chase' && dist > 6 && Math.random() < 0.5) g.audio.groan(dist, 0, z.type === 'runner' ? 1.5 : 1.1);
+          if (z.state !== 'chase' && Math.random() < 0.7) g.audio.zombie('alert', this.mouth(z), this.pitch(z));
           z.state = 'chase';
           z.target.copy(ppos);
           z.memory = 8;
@@ -311,6 +317,7 @@ export class Zombies {
         speed = 0;
         if (z.windup <= 0 && z.attackT <= 0) {
           z.windup = 0.45;
+          if (Math.random() < 0.6) g.audio.zombie('attack', this.mouth(z), this.pitch(z));
         }
       }
       if (z.windup > 0) {

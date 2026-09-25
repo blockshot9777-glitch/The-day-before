@@ -285,12 +285,15 @@ class Game {
       this.zombies.hit(hit.z, dmg, hit.head, dir);
       this.effects.blood(p, hit.head ? 12 : 7);
       this.ui.hitmarker(hit.head);
-      this.audio.impact(true);
+      this.audio.impact('flesh', p);
       if (first) this.effects.tracer(muzzle, p);
       return true;
     }
     const end = origin.clone().addScaledVector(dir, Math.min(tWorld, def.range));
-    if (tWorld < def.range) this.effects.spark(end);
+    if (tWorld < def.range) {
+      this.effects.spark(end);
+      this.audio.impact(this.world.lastHit ? this.world.lastHit.mat : 'dirt', end);
+    }
     if (first) this.effects.tracer(muzzle, end);
     return false;
   }
@@ -318,7 +321,7 @@ class Game {
     this.zombies.hit(best, dmg, false, dir);
     this.effects.blood(new THREE.Vector3(best.pos.x, best.pos.y + 1.3 * best.scale, best.pos.z), 10);
     this.ui.hitmarker(sneak);
-    this.audio.impact(true);
+    this.audio.impact('knife', null);
     if (sneak && best.dead) this.ui.msg('Тихое убийство', 'good');
   }
 
@@ -644,6 +647,8 @@ class Game {
     }
 
     // heartbeat when hurt
+    this.camera.updateMatrixWorld();
+    this.audio.updateListener(this.camera);
     this.beatT = (this.beatT || 0) - dt;
     if (p.hp < 30 && this.beatT <= 0) { this.beatT = 0.9; this.audio.heartbeat(); }
 

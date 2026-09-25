@@ -5,10 +5,11 @@ import { clamp, lerp } from './util.js';
 export const WEAPONS = {
   knife: { name: 'Нож', slot: 1, melee: true, damage: 45, range: 2.3, rate: 0.5, tire: 2.5, hold: 0 },
   pistol: { name: 'ПМ', slot: 2, damage: 28, mag: 12, rate: 0.16, auto: false, spread: 0.014, adsSpread: 0.003, recoil: 0.035, reload: 1.4, ammo: 'ammo_pistol', noise: 45, pellets: 1, range: 120, tire: 1.6, hold: 4 },
-  shotgun: { name: 'ИЖ-81', slot: 3, damage: 15, mag: 6, rate: 0.85, auto: false, spread: 0.065, adsSpread: 0.045, recoil: 0.1, reload: 2.5, ammo: 'ammo_shells', noise: 60, pellets: 9, range: 45, tire: 7, hold: 9 },
+  shotgun: { name: 'ИЖ-81', slot: 3, damage: 15, mag: 6, rate: 0.85, auto: false, spread: 0.065, adsSpread: 0.045, recoil: 0.1, reload: 2.5, shells: true, ammo: 'ammo_shells', noise: 60, pellets: 9, range: 45, tire: 7, hold: 9 },
   rifle: { name: 'АКС-74У', slot: 4, damage: 25, mag: 30, rate: 0.095, auto: true, spread: 0.022, adsSpread: 0.006, recoil: 0.02, reload: 2.2, ammo: 'ammo_rifle', noise: 65, pellets: 1, range: 160, tire: 1.25, hold: 7.5 },
 };
 export const ORDER = ['knife', 'pistol', 'shotgun', 'rifle'];
+const SHELL_TIME = 0.5; // seconds per shotgun shell
 
 // Arm fatigue thresholds (0..100).
 export const FATIGUE = { tremble: 35, twitch: 75 };
@@ -136,6 +137,9 @@ export class Weapons {
     this.switchT = 0;
     this.cooldown = 0;
     this.reloading = 0;
+    this.reloadTotal = 1;
+    this.reloadEvents = [];
+    this.reloadKind = 'pistol';
     this.aiming = false;
     this.aimT = 0;
     this.recoilPitch = 0;
@@ -213,17 +217,47 @@ export class Weapons {
       this.game.ui.msg('Нет патронов для ' + d.name, 'bad');
       return;
     }
-    this.reloading = d.reload;
     this.aiming = false;
-    this.game.audio.reload(0);
+    this.reloadKind = this.current;
+    if (d.shells) {
+      // pump shotgun: one shell at a time, can be interrupted by firing
+      this.reloadTotal = this.reloading = SHELL_TIME + 0.2;
+      this.reloadEvents = [];
+      return;
+    }
+    // a round still in the chamber: no need to rack the slide, 20% faster
+    const tactical = this.mags[this.current] > 0;
+    this.reloadTotal = this.reloading = d.reload * (tactical ? 0.8 : 1);
+    this.reloadEvents = [[0.12, 'mag_out'], [0.6, 'mag_in']];
+    if (!tactical) this.reloadEvents.push([0.82, 'slide']);
   }
 
   finishReload() {
     const d = this.def;
+    if (d.shells) {
+      this.game.inventory.remove(d.ammo, 1);
+      this.mags[this.current] += 1;
+      this.game.audio.mech(this.current, 'shell');
+      if (this.mags[this.current] < d.mag && this.reserve() > 0) this.reloadTotal = this.reloading = SHELL_TIME;
+      else this.game.audio.mech(this.current, 'pump');
+      return;
+    }
     const need = d.mag - this.mags[this.current];
     const got = this.game.inventory.remove(d.ammo, need);
     this.mags[this.current] += got;
-    this.game.audio.reload(1);
+  }
+
+  // Mechanical sounds at fixed points of the reload animation.
+  tickReload(dt) {
+    const done = 1 - this.reloading / this.reloadTotal;
+    while (this.reloadEvents.length && done >= this.reloadEvents[0][0]) {
+      this.game.audio.mech(this.reloadKind, this.reloadEvents.shift()[1]);
+    }
+    this.reloading -= dt;
+    if (this.reloading <= 0) {
+      this.reloading = 0;
+      this.finishReload();
+    }
   }
 
   update(dt, input) {
@@ -246,10 +280,13 @@ export class Weapons {
     const d = this.def;
     // reload
     if (input.pressed('KeyR')) this.startReload();
-    if (this.reloading > 0) {
-      this.reloading -= dt;
-      if (this.reloading <= 0) { this.reloading = 0; this.finishReload(); }
+    // firing interrupts a shell-by-shell reload
+    if (this.reloading > 0 && d.shells && this.mags[this.current] > 0 && input.mousePressed(0)) {
+      this.reloading = 0;
+      this.game.audio.mech(this.current, 'pump');
+      this.cooldown = Math.max(this.cooldown, 0.3);
     }
+    if (this.reloading > 0) this.tickReload(dt);
 
     this.updateArms(dt, input);
     const busy = this.switchT > 0 || this.reloading > 0 || this.twitchT > 0;
@@ -262,7 +299,7 @@ export class Weapons {
       if (d.melee) this.swing();
       else if (this.mags[this.current] > 0) this.fire();
       else {
-        g.audio.empty();
+        g.audio.empty(this.current);
         this.cooldown = 0.25;
         if (this.reserve() > 0) this.startReload();
         else if (input.mousePressed(0)) g.ui.msg('Магазин пуст', 'bad');
@@ -449,7 +486,7 @@ export class Weapons {
     let ry = p.sprinting ? 0.5 : 0;
     let rz = this.twitchT > 0 ? Math.sign(this.jerkYaw) * 0.4 * Math.sin((this.twitchT / 0.65) * Math.PI) : 0;
     if (this.reloading > 0) {
-      const k = Math.sin((1 - this.reloading / this.def.reload) * Math.PI);
+      const k = Math.sin((1 - this.reloading / this.reloadTotal) * Math.PI);
       rx -= k * 0.35;
       rz = k * 0.6;
       m.position.y -= k * 0.06;
