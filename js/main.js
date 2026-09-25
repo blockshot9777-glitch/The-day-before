@@ -266,7 +266,13 @@ class Game {
   onKey(e) {
     if (e.code === 'Escape') {
       if (this.state === 'playing') { this.pause(); return true; }
-      if (this.state === 'paused') { this.resume(); return true; }
+      if (this.state === 'paused') {
+        // The browser releases pointer lock on Esc before the page sees the key,
+        // so the same press already paused the game: don't let it resume at once.
+        if (performance.now() - (this.lockPauseAt || -1e9) < 500) return true;
+        this.resume();
+        return true;
+      }
       if (this.state === 'inventory') { this.resume(); return true; }
     }
     if (e.code === 'KeyM') {
@@ -282,7 +288,10 @@ class Game {
 
   onLockChange() {
     const locked = document.pointerLockElement === this.canvas;
-    if (!locked && this.state === 'playing' && !this.expectUnlock) this.pause();
+    if (!locked && this.state === 'playing' && !this.expectUnlock) {
+      this.pause();
+      this.lockPauseAt = performance.now();
+    }
     this.expectUnlock = false;
   }
 

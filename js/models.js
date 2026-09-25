@@ -22,7 +22,7 @@ const SKIN = {
 export async function loadModel(loader, url) {
   try {
     return await loader.loadAsync(url);
-  } catch (err) {
+  } catch {
     return loader.loadAsync(url + '.json');
   }
 }

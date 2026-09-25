@@ -15,6 +15,11 @@ const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
 const errs = [];
 page.on('pageerror', (e) => errs.push('pageerror: ' + e.message + '\n' + e.stack));
 page.on('console', (m) => { if (m.type() === 'error' && !/fonts|CERT|ERR_/.test(m.text())) errs.push('console: ' + m.text()); });
+// CI runners have no GPU: render lighter so the menu stays responsive (game logic is unchanged)
+await page.addInitScript(() => {
+  try { localStorage.setItem('tdb.settings', JSON.stringify({ shadows: 'off', scale: 0.5 })); } catch { /* ignore */ }
+});
+page.setDefaultTimeout(120000);
 await page.goto(URL);
 await page.waitForFunction(() => window.__game);
 const ev = (f, a) => page.evaluate(f, a);
@@ -248,7 +253,11 @@ try {
   await page.keyboard.press('Escape');
   state = await ev(() => window.__game.state);
   check('Esc pauses', state === 'paused', state);
+  // like a player: the second press comes a moment later (the first one may
+  // also have released pointer lock, which is ignored for 0.5 s)
+  await page.waitForTimeout(700);
   await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
   state = await ev(() => window.__game.state);
   check('Esc resumes', state === 'playing', state);
   await ev(() => { window.__game.giveItem('w_rifle', 1); window.__game.inventory.add('ammo_rifle', 60); });
