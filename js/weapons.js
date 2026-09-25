@@ -3,12 +3,15 @@ import * as THREE from 'three';
 import { clamp, lerp } from './util.js';
 
 export const WEAPONS = {
-  knife: { name: 'Нож', slot: 1, melee: true, damage: 45, range: 2.3, rate: 0.5 },
-  pistol: { name: 'ПМ', slot: 2, damage: 28, mag: 12, rate: 0.16, auto: false, spread: 0.014, adsSpread: 0.003, recoil: 0.035, reload: 1.4, ammo: 'ammo_pistol', noise: 45, pellets: 1, range: 120 },
-  shotgun: { name: 'ИЖ-81', slot: 3, damage: 15, mag: 6, rate: 0.85, auto: false, spread: 0.065, adsSpread: 0.045, recoil: 0.1, reload: 2.5, ammo: 'ammo_shells', noise: 60, pellets: 9, range: 45 },
-  rifle: { name: 'АКС-74У', slot: 4, damage: 25, mag: 30, rate: 0.095, auto: true, spread: 0.022, adsSpread: 0.006, recoil: 0.02, reload: 2.2, ammo: 'ammo_rifle', noise: 65, pellets: 1, range: 160 },
+  knife: { name: 'Нож', slot: 1, melee: true, damage: 45, range: 2.3, rate: 0.5, tire: 2.5, hold: 0 },
+  pistol: { name: 'ПМ', slot: 2, damage: 28, mag: 12, rate: 0.16, auto: false, spread: 0.014, adsSpread: 0.003, recoil: 0.035, reload: 1.4, ammo: 'ammo_pistol', noise: 45, pellets: 1, range: 120, tire: 1.6, hold: 4 },
+  shotgun: { name: 'ИЖ-81', slot: 3, damage: 15, mag: 6, rate: 0.85, auto: false, spread: 0.065, adsSpread: 0.045, recoil: 0.1, reload: 2.5, ammo: 'ammo_shells', noise: 60, pellets: 9, range: 45, tire: 7, hold: 9 },
+  rifle: { name: 'АКС-74У', slot: 4, damage: 25, mag: 30, rate: 0.095, auto: true, spread: 0.022, adsSpread: 0.006, recoil: 0.02, reload: 2.2, ammo: 'ammo_rifle', noise: 65, pellets: 1, range: 160, tire: 1.25, hold: 7.5 },
 };
 export const ORDER = ['knife', 'pistol', 'shotgun', 'rifle'];
+
+// Arm fatigue thresholds (0..100).
+export const FATIGUE = { tremble: 35, twitch: 75 };
 
 function mat(color, o = {}) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.15, ...o });
@@ -143,6 +146,22 @@ export class Weapons {
     this.bloom = 0;
     this.shotsFired = 0;
     this.shotsHit = 0;
+    // arm fatigue & body-cam style hand movement
+    this.fatigue = 0;
+    this.armT = 0;
+    this.restT = 0; // seconds since the arms last worked
+    this.twitchT = 0;
+    this.twitches = 0;
+    this.jerkYaw = 0;
+    this.jerkPitch = 0;
+    this.swayYaw = 0;
+    this.swayPitch = 0;
+    this.lagX = 0;
+    this.lagY = 0;
+    this.microT = 0;
+    this.micro = 0;
+    this.phase = [Math.random() * 10, Math.random() * 10, Math.random() * 10, Math.random() * 10];
+    this.warnedTwitch = false;
     this.show(this.current);
   }
 
@@ -232,7 +251,8 @@ export class Weapons {
       if (this.reloading <= 0) { this.reloading = 0; this.finishReload(); }
     }
 
-    const busy = this.switchT > 0 || this.reloading > 0;
+    this.updateArms(dt, input);
+    const busy = this.switchT > 0 || this.reloading > 0 || this.twitchT > 0;
     this.aiming = !d.melee && input.mouseDown(2) && !busy && !p.sprinting;
     this.aimT = lerp(this.aimT, this.aiming ? 1 : 0, Math.min(1, dt * 14));
 
@@ -265,10 +285,92 @@ export class Weapons {
     this.pose(dt);
   }
 
+  // How fast the arms tire: hunger, exhaustion and wounds make it worse.
+  fatigueMul() {
+    const p = this.game.player;
+    let m = 1;
+    if (p.hunger < 25) m += 0.5;
+    if (p.thirst < 25) m += 0.3;
+    if (p.exhausted) m += 0.5;
+    if (p.hp < 30) m += 0.4;
+    return m;
+  }
+
+  tire(amount) {
+    this.fatigue = clamp(this.fatigue + amount * this.fatigueMul(), 0, 100);
+    this.restT = 0;
+  }
+
+  updateArms(dt, input) {
+    const g = this.game;
+    const p = g.player;
+    const d = this.def;
+    // holding a gun up tires the arms; lowering it lets them recover
+    if (this.aiming) this.tire(d.hold * dt);
+    this.restT += dt;
+    const lowered = p.sprinting || this.reloading > 0 || this.switchT > 0 || this.twitchT > 0;
+    if (!this.aiming && (this.restT > 0.7 || lowered)) {
+      const rate = (lowered ? 20 : 13) * (p.crouching ? 1.3 : 1);
+      this.fatigue = Math.max(0, this.fatigue - rate * dt);
+    }
+
+    // tremor: smooth pseudo-noise, grows with fatigue; low stamina adds breathing sway
+    const f = this.fatigue / 100;
+    this.armT += dt;
+    const t = this.armT;
+    const ph = this.phase;
+    const amp = Math.pow(f, 1.5) * 0.02 * (1 - this.aimT * 0.25) + (1 - p.stamina / 100) * 0.005;
+    const nx = Math.sin(t * 1.3 + ph[0]) * 0.6 + Math.sin(t * 3.7 + ph[1]) * 0.3 + Math.sin(t * 9.1 + ph[2]) * 0.1 * f;
+    const ny = Math.sin(t * 1.1 + ph[3]) * 0.5 + Math.sin(t * 2.9 + ph[0]) * 0.35 + Math.sin(t * 11 + ph[1]) * 0.15 * f;
+    // small nervous twitches once the arms are tired
+    this.microT -= dt;
+    if (this.fatigue > FATIGUE.tremble + 10 && this.microT <= 0) {
+      this.microT = 0.4 + Math.random() * 1.6;
+      this.micro = (Math.random() - 0.5) * 0.012 * f;
+    }
+    this.micro *= Math.exp(-dt * 10);
+    this.swayYaw = nx * amp + this.micro;
+    this.swayPitch = ny * amp * 0.8 + this.micro * 0.5;
+
+    // the hand gives out: sharp jerk, the gun drops for a moment (body-cam style)
+    if (this.twitchT > 0) this.twitchT -= dt;
+    const busyArms = this.aiming || this.restT < 0.3;
+    if (this.twitchT <= 0 && busyArms && !d.melee && this.fatigue > FATIGUE.twitch) {
+      const chance = ((this.fatigue - FATIGUE.twitch) / (100 - FATIGUE.twitch)) * 0.9 * dt;
+      if (this.fatigue >= 99.5 || Math.random() < chance) this.twitch();
+    }
+    this.jerkYaw *= Math.exp(-dt * 5);
+    this.jerkPitch *= Math.exp(-dt * 5);
+
+    // view-model lags behind fast mouse movement
+    this.lagX = lerp(this.lagX, clamp(-input.dx * 0.0009, -0.04, 0.04), Math.min(1, dt * 10));
+    this.lagY = lerp(this.lagY, clamp(input.dy * 0.0009, -0.04, 0.04), Math.min(1, dt * 10));
+  }
+
+  twitch() {
+    const g = this.game;
+    const side = Math.random() < 0.5 ? -1 : 1;
+    this.twitchT = 0.65;
+    this.twitches++;
+    this.aiming = false;
+    this.jerkYaw = side * (0.05 + Math.random() * 0.04);
+    this.jerkPitch = -(0.04 + Math.random() * 0.04);
+    // part of the jerk stays: you have to find the target again
+    g.player.yaw += this.jerkYaw * 0.35;
+    g.player.pitch = clamp(g.player.pitch + this.jerkPitch * 0.35, -1.5, 1.5);
+    this.fatigue = Math.max(0, this.fatigue - 30);
+    g.shake = Math.max(g.shake, 0.3);
+    g.audio.twitch();
+    if (!this.warnedTwitch) {
+      this.warnedTwitch = true;
+      g.ui.msg('Рука сорвалась. Опусти оружие, дай рукам отдохнуть', 'bad');
+    }
+  }
+
   spreadNow() {
     const d = this.def;
     const p = this.game.player;
-    let s = lerp(d.spread, d.adsSpread, this.aimT) + this.bloom;
+    let s = lerp(d.spread, d.adsSpread, this.aimT) + this.bloom + (this.fatigue / 100) * 0.012;
     if (p.speedNow > 1) s += 0.02 * Math.min(1, p.speedNow / 5);
     if (!p.grounded) s += 0.04;
     if (p.crouching) s *= 0.7;
@@ -293,7 +395,9 @@ export class Weapons {
       if (g.shoot(origin, dir, d, i === 0)) anyHit = true;
     }
     if (anyHit) this.shotsHit++;
-    this.recoilPitch += d.recoil * (this.aiming ? 0.6 : 1);
+    const tired = 1 + (this.fatigue / 100) * 0.6;
+    this.recoilPitch += d.recoil * (this.aiming ? 0.6 : 1) * tired;
+    this.tire(d.tire);
     g.player.pitch = clamp(g.player.pitch + d.recoil * 0.35, -1.5, 1.5);
     g.player.yaw += (Math.random() - 0.5) * d.recoil * 0.3;
     this.kick = 1;
@@ -313,6 +417,7 @@ export class Weapons {
     this.cooldown = d.rate;
     this.swingT = 0.3;
     this.meleeT = 0.09; // the blade lands a moment after the swing starts
+    this.tire(d.tire);
     g.audio.swing();
     g.noise(g.player.pos, 3);
   }
@@ -330,15 +435,19 @@ export class Weapons {
     pos.x += Math.cos(p.bob) * 0.012 * moveAmt;
     pos.y += Math.abs(Math.sin(p.bob)) * 0.014 * moveAmt + Math.sin(t * 1.6) * 0.003;
     pos.z += this.kick * 0.06;
+    // inertia and tired hands shaking the gun
+    pos.x += this.lagX + this.swayYaw * 0.35;
+    pos.y += this.lagY - this.swayPitch * 0.35;
     // lowered while sprinting, switching or reloading
     let lower = 0;
     if (p.sprinting) lower = 0.6;
     if (this.switchT > 0) lower = Math.sin((this.switchT / 0.3) * Math.PI);
+    if (this.twitchT > 0) lower = Math.max(lower, Math.sin((this.twitchT / 0.65) * Math.PI) * 0.9);
     pos.y -= lower * 0.12;
     m.position.copy(pos);
     let rx = this.kick * 0.12 - lower * 0.5;
     let ry = p.sprinting ? 0.5 : 0;
-    let rz = 0;
+    let rz = this.twitchT > 0 ? Math.sign(this.jerkYaw) * 0.4 * Math.sin((this.twitchT / 0.65) * Math.PI) : 0;
     if (this.reloading > 0) {
       const k = Math.sin((1 - this.reloading / this.def.reload) * Math.PI);
       rx -= k * 0.35;

@@ -263,6 +263,23 @@ try {
   s = await ev(() => window.__game.weapons.current);
   check('mouse wheel cycles weapon', s === 'rifle', s);
   await shot('rifle');
+  // arm fatigue: sustained aimed fire tires the arms, tremor moves the view, the hand gives out, rest recovers
+  await ev(() => { const g = window.__game; g.weapons.fatigue = 0; g.inventory.add('ammo_rifle', 90); g.weapons.select('rifle'); g.weapons.mags.rifle = 30; });
+  await tick(0.5);
+  await page.mouse.down({ button: 'right' }); await page.mouse.down(); await tick(0.5);
+  const mid = await ev(() => { const g = window.__game, w = g.weapons; return { f: +w.fatigue.toFixed(1), aim: w.aiming, cur: w.current, mag: w.mags.rifle, rel: w.reloading, st: g.state, btn: [...g.input.buttons] }; });
+  await tick(1.5); await page.mouse.up(); await tick(0.05);
+  s = await ev(() => ({ f: window.__game.weapons.fatigue, chip: document.getElementById('status-row').textContent }));
+  s.mid = mid;
+  check('sustained aimed fire tires the arms', s.f > 35 && /Руки/.test(s.chip), JSON.stringify(s));
+  s = await ev(() => { const g = window.__game, w = g.weapons; w.fatigue = 70; w.twitchT = 0; w.jerkYaw = 0; const ys = []; for (let i = 0; i < 90; i++) { g.tick(1 / 60, 1); ys.push(g.camera.rotation.y - g.player.yaw); } return { spread: Math.max(...ys) - Math.min(...ys) }; });
+  check('tired arms make the aim tremble', s.spread > 0.004, JSON.stringify(s));
+  s = await ev(() => { const g = window.__game, w = g.weapons; w.fatigue = 100; const n0 = w.twitches; g.tick(1 / 60, 30); return { twitches: w.twitches - n0, f: w.fatigue, t: w.twitchT }; });
+  check('exhausted hand gives out (twitch)', s.twitches >= 1 && s.f < 75, JSON.stringify(s));
+  await page.mouse.up({ button: 'right' });
+  await tick(6);
+  s = await ev(() => window.__game.weapons.fatigue);
+  check('lowered weapon lets the arms recover', s < 5, s.toFixed(1));
   // settings persistence
   await page.keyboard.press('Escape');
   await page.click('#btn-settings2');

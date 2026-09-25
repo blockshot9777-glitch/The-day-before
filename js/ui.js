@@ -1,6 +1,6 @@
 // DOM HUD: bars, ammo, compass, minimap, messages, inventory and screens.
 import { ITEMS } from './items.js';
-import { WEAPONS, ORDER } from './weapons.js';
+import { WEAPONS, ORDER, FATIGUE } from './weapons.js';
 import { HALF } from './world.js';
 
 const $ = (id) => document.getElementById(id);
@@ -224,6 +224,9 @@ export class UI {
     if (p.energyTime > 0) chips.push(['good', 'Энергия']);
     if (p.healOverTime > 0) chips.push(['good', 'Лечение']);
     if (p.lightOn || p.battery < 100) chips.push([p.battery < 20 ? 'warn' : '', `Фонарь ${Math.ceil(p.battery)}%`]);
+    const fat = w.fatigue;
+    if (fat > FATIGUE.twitch) chips.push(['bad', 'Руки дрожат']);
+    else if (fat > FATIGUE.tremble) chips.push(['warn', 'Руки устали']);
     if (p.crouching) chips.push(['', 'Присед']);
     const key = chips.map((c) => c.join(':')).join('|');
     if (key !== this.statusKey) {

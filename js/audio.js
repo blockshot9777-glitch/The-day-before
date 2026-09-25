@@ -163,6 +163,13 @@ export class Audio {
     lfo.stop(t + 1.2);
   }
 
+  // Hand gives out: cloth rustle, gear rattle and a short grunt.
+  twitch() {
+    this.noise(0.22, { gain: 0.35, type: 'bandpass', freq: 900, freqEnd: 300, q: 1.2, attack: 0.01 });
+    this.noise(0.08, { gain: 0.25, type: 'highpass', freq: 3500 });
+    this.tone(150, 0.18, { gain: 0.25, type: 'sawtooth', freqEnd: 95 });
+  }
+
   pickup() {
     this.tone(660, 0.08, { gain: 0.2, type: 'triangle' });
     this.tone(990, 0.1, { gain: 0.2, type: 'triangle', delay: 0.07 });

@@ -249,6 +249,7 @@ input[type=checkbox] { accent-color: var(--amber); width: 18px; height: 18px; }
   #counter { top: 154px; }
   #feed { bottom: 128px; }
   #feed .msg { font-size: 14px; }
+  #feed { max-height: calc(100vh - 250px); overflow: hidden; }
   #vitals { gap: 4px; }
   #ammo-mag { font-size: 38px; }
   .cell .ic { font-size: 12px; }

@@ -46,6 +46,8 @@ export class Player {
     this.speedNow = 0;
     this.sprinting = false;
     this.landKick = 0;
+    this.strafe = 0;
+    this.roll = 0;
     this.dead = false;
     this.distance = 0;
     this.flashlight.intensity = 0;
@@ -121,6 +123,7 @@ export class Player {
     const fx = (input.down('KeyW') ? 1 : 0) - (input.down('KeyS') ? 1 : 0);
     const sx = (input.down('KeyD') ? 1 : 0) - (input.down('KeyA') ? 1 : 0);
     const moving = fx !== 0 || sx !== 0;
+    this.strafe = sx;
     const wantSprint = input.down('ShiftLeft') || input.down('ShiftRight');
     const canSprint = !this.exhausted && fx > 0 && !this.crouching && !g.weapons.aiming;
     this.sprinting = wantSprint && canSprint && moving;
@@ -258,6 +261,9 @@ export class Player {
       g.shake = Math.max(0, g.shake - dt * 1.2);
     }
     cam.position.set(this.pos.x + bobX * Math.cos(this.yaw), this.eye + bobY - this.landKick, this.pos.z - bobX * Math.sin(this.yaw));
-    cam.rotation.set(this.pitch + g.weapons.recoilPitch + sy, this.yaw + sx, 0, 'YXZ');
+    const w = g.weapons;
+    // strafing leans the camera slightly, like a chest-mounted body cam
+    this.roll = lerp(this.roll || 0, -this.strafe * 0.012, Math.min(1, dt * 6));
+    cam.rotation.set(this.pitch + w.recoilPitch + w.swayPitch + w.jerkPitch + sy, this.yaw + w.swayYaw + w.jerkYaw + sx, this.roll, 'YXZ');
   }
 }
