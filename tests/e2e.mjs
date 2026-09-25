@@ -1,3 +1,4 @@
+/* global place, LANE -- helpers installed inside the page, used from page.evaluate */
 // End-to-end check of every game mechanic in a headless browser.
 // Run: npm install && npm test   (screenshots go to test-results/)
 // Game time is advanced with window.__game.tick(), so results don't depend on FPS.
@@ -24,15 +25,26 @@ const shot = async (name) => { await page.waitForTimeout(1200); await page.scree
 const clearZ = () => ev(() => { const g = window.__game; g.zombies.list.forEach(z => g.zombies.group.remove(z.mesh)); g.zombies.list.length = 0; g.zombies.spawnT = 1e9; });
 try {
   await page.click('#btn-play');
-  await ev(() => { window.__game.manual = true; });
+  await ev(() => {
+    const g = window.__game;
+    g.manual = true;
+    // test lane: the village main street, clear from x=100 to x=-10 along z=20.5, facing west (-X)
+    window.LANE = { x: 60, z: 20.5, yaw: Math.PI / 2 };
+    window.place = (x, z, yaw = Math.PI / 2, pitch = 0) => {
+      const p = g.player;
+      p.pos.set(x, g.world.groundAt({ x, z }, 0.3, 1000, 2000), z);
+      p.vel.set(0, 0, 0); p.yaw = yaw; p.pitch = pitch; p.grounded = true;
+    };
+  });
   await clearZ();
   // freeze real-time loop progress by making dt tiny: pause state between ticks is not needed; ticks dominate.
   // 1. walk / sprint / jump / crouch
-  let z0 = await ev(() => window.__game.player.pos.z);
+  await ev(() => place(LANE.x + 30, LANE.z));
+  let x0 = await ev(() => window.__game.player.pos.x);
   await page.keyboard.down('KeyW'); await tick(1); await page.keyboard.up('KeyW');
-  let z1 = await ev(() => window.__game.player.pos.z);
-  check('walk 1s ≈ 4 m', z0 - z1 > 3 && z0 - z1 < 5, (z0 - z1).toFixed(2));
-  await ev(() => { window.__game.player.pos.set(2, 0, 50); });
+  let x1 = await ev(() => window.__game.player.pos.x);
+  check('walk 1s ≈ 4 m', x0 - x1 > 3 && x0 - x1 < 5, (x0 - x1).toFixed(2));
+  await ev(() => place(LANE.x + 35, LANE.z));
   await page.keyboard.down('ShiftLeft'); await page.keyboard.down('KeyW'); await tick(1);
   let s = await ev(() => ({ st: window.__game.player.stamina, sp: window.__game.player.speedNow }));
   await page.keyboard.up('KeyW'); await page.keyboard.up('ShiftLeft');
@@ -40,8 +52,9 @@ try {
   check('sprint faster & drains stamina', s.st < 90 && s.sp > 6, JSON.stringify(s) + ' ' + JSON.stringify(diag));
   await tick(1);
   const pre = await ev(() => { const g = window.__game, p = g.player; return { state: g.state, grounded: p.grounded, st: Math.round(p.stamina), pos: p.pos.toArray().map((v) => +v.toFixed(2)), focus: document.activeElement.id || document.activeElement.tagName }; });
+  const y0 = await ev(() => window.__game.player.pos.y);
   await page.keyboard.press('Space'); await tick(0.25);
-  const y = await ev(() => window.__game.player.pos.y);
+  const y = (await ev(() => window.__game.player.pos.y)) - y0;
   check('jump', y > 0.5, y.toFixed(2) + ' ' + JSON.stringify(pre));
   await tick(1);
   await page.keyboard.down('KeyC'); await tick(0.5);
@@ -51,16 +64,17 @@ try {
   check('crouch & stand', s.c && s.h < 1.3 && hUp > 1.6, JSON.stringify(s) + ' up=' + hUp.toFixed(2));
   // wall collision: walk into a house wall
   s = await ev(() => {
-    const g = window.__game, b = g.world.buildings.find(b => !b.enterable);
-    g.player.pos.set((b.minX + b.maxX) / 2, 0, b.maxZ + 3); g.player.yaw = 0; g.player.pitch = 0;
-    return b.maxZ;
+    // the village shop's back (north) wall, walking south into it
+    const g = window.__game, b = g.world.buildings.find((b) => b.name === 'Сельпо');
+    place((b.minX + b.maxX) / 2, b.minZ - 3, Math.PI);
+    return b.minZ;
   });
   await page.keyboard.down('KeyW'); await tick(2); await page.keyboard.up('KeyW');
   const pz = await ev(() => window.__game.player.pos.z);
-  check('wall blocks player', pz >= s + 0.3, `wall=${s.toFixed(2)} player=${pz.toFixed(2)}`);
+  check('wall blocks player', pz <= s - 0.3, `wall=${s.toFixed(2)} player=${pz.toFixed(2)}`);
 
   // 2. shoot
-  await ev(() => { const g = window.__game, p = g.player; p.pos.set(2, 0, 30); p.yaw = 0; p.pitch = 0; g.zombies.spawn('walker', 2, 22, 'idle'); });
+  await ev(() => { const g = window.__game; place(LANE.x, LANE.z); g.zombies.spawn('walker', LANE.x - 8, LANE.z, 'idle'); });
   await tick(0.1);
   for (let i = 0; i < 6; i++) { await page.mouse.move(480, 270); await page.mouse.down(); await tick(0.05); await page.mouse.up(); await tick(0.3); }
   s = await ev(() => { const g = window.__game; return { kills: g.stats.kills, mag: g.weapons.mags.pistol, fired: g.weapons.shotsFired, hit: g.weapons.shotsHit }; });
@@ -73,7 +87,7 @@ try {
   check('reload moves ammo from backpack', s.mag === 12 && s.res < res0, `${res0} -> ${JSON.stringify(s)}`);
   // 4. knife stealth kill
   await page.keyboard.press('Digit1'); await tick(0.5);
-  await ev(() => { const g = window.__game, p = g.player; p.yaw = 0; p.pitch = -0.2; g.zombies.spawn('walker', p.pos.x, p.pos.z - 1.6, 'idle'); g.zombies.list.at(-1).yaw = Math.PI; g.zombies.list.at(-1).idleStop = true; g.zombies.list.at(-1).wanderT = 99; });
+  await ev(() => { const g = window.__game, p = g.player; place(p.pos.x, p.pos.z, LANE.yaw, -0.2); g.zombies.spawn('walker', p.pos.x - 1.6, p.pos.z, 'idle'); g.zombies.list.at(-1).yaw = -Math.PI / 2; g.zombies.list.at(-1).idleStop = true; g.zombies.list.at(-1).wanderT = 99; });
   await page.keyboard.down('KeyC'); await tick(0.3);
   await page.mouse.down(); await tick(0.05); await page.mouse.up(); await tick(0.2);
   await page.keyboard.up('KeyC'); await tick(0.5);
@@ -82,7 +96,7 @@ try {
   await page.keyboard.press('Digit2'); await tick(0.5);
   // 5. zombie AI: sees player & chases, attacks
   await clearZ();
-  await ev(() => { const g = window.__game, p = g.player; p.pos.set(2, 0, 30); p.hp = 100; g.zombies.spawn('walker', 2, 18, 'idle'); Object.assign(g.zombies.list[0], { yaw: 0, wanderT: 99, idleStop: true }); });
+  await ev(() => { const g = window.__game, p = g.player; place(LANE.x, LANE.z); p.hp = 100; g.zombies.spawn('walker', LANE.x - 12, LANE.z, 'idle'); Object.assign(g.zombies.list[0], { yaw: Math.PI / 2, wanderT: 99, idleStop: true }); });
   await tick(1);
   s = await ev(() => { const g = window.__game, z = g.zombies.list[0]; return { st: z.state, zp: z.pos.toArray().map((v) => +v.toFixed(1)), yaw: +z.yaw.toFixed(2), pp: g.player.pos.toArray().map((v) => +v.toFixed(1)), dayF: g.dayF, n: g.zombies.list.length, los: g.world.lineOfSight({ x: z.pos.x, y: 1.7, z: z.pos.z }, g.player.eyePos()) }; });
   check('zombie notices player in view', s.st === 'chase', JSON.stringify(s));
@@ -92,7 +106,7 @@ try {
   await clearZ();
   await ev(() => { const g = window.__game; g.player.hp = 100; g.player.bleeding = false; });
   // hearing: zombie behind a wall hears a gunshot
-  await ev(() => { const g = window.__game, p = g.player; p.pos.set(2, 0, 30); p.yaw = 0; g.zombies.spawn('walker', 2, 60, 'idle'); g.zombies.list[0].yaw = 0; });
+  await ev(() => { const g = window.__game; place(LANE.x, LANE.z); g.zombies.spawn('walker', LANE.x - 30, LANE.z, 'idle'); g.zombies.list[0].yaw = -Math.PI / 2; });
   await page.mouse.down(); await tick(0.05); await page.mouse.up(); await tick(0.1);
   s = await ev(() => window.__game.zombies.list[0].state);
   check('gunshot alerts zombie 30 m away', s === 'alert' || s === 'chase', s);
@@ -105,7 +119,7 @@ try {
     const b = w.buildings[c.building];
     const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
     const dx = cx - c.x, dz = cz - c.z, d = Math.hypot(dx, dz);
-    p.pos.set(c.x + dx / d * 1.4, 0.12, c.z + dz / d * 1.4);
+    p.pos.set(c.x + dx / d * 1.4, b.floor, c.z + dz / d * 1.4);
     p.yaw = Math.atan2(-(c.x - p.pos.x), -(c.z - p.pos.z)); p.pitch = -0.25;
     return { kind: c.kind, items: JSON.stringify(c.items), idx: w.containers.indexOf(c) };
   });
@@ -123,8 +137,8 @@ try {
       const b = w.buildings[c.building];
       const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
       const dx = cx - c.x, dz = cz - c.z, d = Math.hypot(dx, dz);
-      p.pos.set(c.x + dx / d * 1.3, 0.12, c.z + dz / d * 1.3);
-      w.collide(p.pos, 0.35, 0.12, 1.75);
+      p.pos.set(c.x + dx / d * 1.3, b.floor, c.z + dz / d * 1.3);
+      w.collide(p.pos, 0.35, b.floor, 1.75);
       p.yaw = Math.atan2(-(c.x - p.pos.x), -(c.z - p.pos.z)); p.pitch = -0.3;
       const it = g.findInteract();
       if (it && it.obj === c) ok++; else bad.push(c.kind);
@@ -134,7 +148,7 @@ try {
   check('every house container is interactable', s.bad.length === 0, JSON.stringify(s));
 
   // 7. inventory
-  await ev(() => { window.__game.player.pos.set(2, 0, 30); window.__game.player.thirst = 30; });
+  await ev(() => { place(LANE.x, LANE.z); window.__game.player.thirst = 30; });
   await page.keyboard.press('Tab'); await page.waitForTimeout(200);
   let state = await ev(() => window.__game.state);
   check('inventory opens', state === 'inventory');
@@ -173,7 +187,7 @@ try {
   await ev(() => { const p = window.__game.player; p.hunger = 100; p.thirst = 100; p.hp = 100; });
 
   // 9. night + flashlight
-  await ev(() => { const g = window.__game; g.timeOfDay = 0.94; g.player.pos.set(2, 0, 30); g.player.yaw = 0; g.player.pitch = -0.1; });
+  await ev(() => { const g = window.__game; g.timeOfDay = 0.94; place(LANE.x, LANE.z, LANE.yaw, -0.1); });
   await page.keyboard.press('KeyF'); await tick(0.1);
   s = await ev(() => ({ on: window.__game.player.lightOn, i: window.__game.player.flashlight.intensity, dayF: window.__game.dayF, target: window.__game.zombies.targetCount() }));
   check('night: flashlight on, more zombies', s.on && s.i > 0 && s.dayF < 0.1, JSON.stringify(s));
@@ -192,7 +206,7 @@ try {
   await ev(() => {
     const g = window.__game, rc = g.world.radioConsole, p = g.player, b = g.world.buildings.find(b => rc.x > b.minX && rc.x < b.maxX && rc.z > b.minZ && rc.z < b.maxZ);
     const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2, dx = cx - rc.x, dz = cz - rc.z, d = Math.hypot(dx, dz) || 1;
-    p.pos.set(rc.x + dx / d * 1.5, 0.12, rc.z + dz / d * 1.5);
+    p.pos.set(rc.x + dx / d * 1.5, b.floor, rc.z + dz / d * 1.5);
     p.yaw = Math.atan2(-(rc.x - p.pos.x), -(rc.z - p.pos.z)); p.pitch = -0.3;
   });
   await tick(0.1);
@@ -212,7 +226,7 @@ try {
   s = await ev(() => { const h = window.__game.effects.heli, pad = window.__game.world.helipad; return { landed: h.landed, dist: Math.hypot(h.group.position.x - pad.x, h.group.position.z - pad.z).toFixed(1), y: h.group.position.y.toFixed(2) }; });
   check('heli flies in and lands on its own', s.landed, JSON.stringify(s));
   await clearZ();
-  await ev(() => { const g = window.__game, pad = g.world.helipad; g.player.pos.set(pad.x + 7, 0.14, pad.z); g.player.yaw = Math.PI / 2; g.player.pitch = 0.05; });
+  await ev(() => { const g = window.__game, pad = g.world.helipad; place(pad.x + 7, pad.z, Math.PI / 2, 0.05); });
   await tick(0.1);
   await shot('heli');
   await page.keyboard.press('KeyE'); await tick(0.1);
@@ -240,14 +254,14 @@ try {
   await ev(() => { window.__game.giveItem('w_rifle', 1); window.__game.inventory.add('ammo_rifle', 60); });
   await tick(0.5);
   await clearZ();
-  await ev(() => { const g = window.__game, p = g.player; p.pos.set(2, 0, 30); p.yaw = 0; p.pitch = 0; });
+  await ev(() => { place(LANE.x, LANE.z); });
   const m0 = await ev(() => window.__game.weapons.mags.rifle);
   await page.mouse.down(); await tick(0.5); await page.mouse.up(); await tick(0.05);
   const m1 = await ev(() => window.__game.weapons.mags.rifle);
   check('rifle is full-auto', m0 - m1 >= 4, `${m0} -> ${m1}`);
   await ev(() => window.__game.giveItem('w_shotgun', 1));
   await tick(0.5);
-  await ev(() => { const g = window.__game; g.zombies.spawn('brute', 2, 24, 'idle'); g.inventory.add('ammo_shells', 10); });
+  await ev(() => { const g = window.__game; g.zombies.spawn('brute', LANE.x - 6, LANE.z, 'idle'); g.inventory.add('ammo_shells', 10); });
   const hp0 = await ev(() => window.__game.zombies.list[0].hp);
   await page.mouse.down(); await tick(0.05); await page.mouse.up(); await tick(0.1);
   const hp1 = await ev(() => window.__game.zombies.list[0].hp);
@@ -315,17 +329,18 @@ try {
     out.reload = heard(() => { g.inventory.add('ammo_pistol', 12); w.startReload(); g.tick(1 / 60, 90); });
     out.dry = heard(() => a.empty('rifle'));
     const house = g.world.buildings.find((b) => b.enterable);
-    const floor = g.world.surfaceAt((house.minX + house.maxX) / 2, 0.12, (house.minZ + house.maxZ) / 2);
+    const floor = g.world.surfaceAt((house.minX + house.maxX) / 2, house.floor, (house.minZ + house.maxZ) / 2);
     out.stepWood = heard(() => a.step(false, floor));
     const z = g.zombies.spawn('walker', g.player.pos.x + 3, g.player.pos.z, 'idle');
     out.death = heard(() => g.zombies.kill(z, { x: 1, y: 0, z: 0 }));
-    out.surface = [g.world.surfaceAt(0, 0, 0), g.world.surfaceAt(30, 0, 30)];
+    const W = g.world;
+    out.surface = [W.surfaceAt(262, 50, 0), W.surfaceAt(60, 10, 20.5), W.surfaceAt(-118, -0.5, 5), W.surfaceAt(170, 10, 110)];
     return out;
   });
   check('pistol shot plays close + distant layers', s.shot.includes('pistol_shot') && s.shot.includes('pistol_shot_far'), JSON.stringify(s.shot));
   check('tactical reload: mag out, mag in, no slide', s.reload.join() === 'pistol_mag_out,pistol_mag_in', JSON.stringify(s.reload));
   check('dry fire, footsteps and zombie death sounds', s.dry[0] === 'rifle_dry' && s.stepWood[0] === 'step_wood' && s.death[0] === 'zombie_death', JSON.stringify(s));
-  check('road sounds hard, lawn sounds like grass', s.surface[0] === 'hard' && s.surface[1] !== 'hard', JSON.stringify(s.surface));
+  check('surfaces: highway hard, dirt street gravel, river mud, field grass', s.surface.join() === 'hard,gravel,mud,grass', JSON.stringify(s.surface));
   s = await ev(() => {
     const g = window.__game, w = g.weapons, a = g.audio;
     w.owned.shotgun = true; w.current = 'shotgun'; w.show('shotgun'); w.reloading = 0; w.switchT = 0; w.mags.shotgun = 3;
@@ -339,6 +354,72 @@ try {
     return { mid, end: w.mags.shotgun, used: before - g.inventory.count('ammo_shells'), sounds: [...a.played] };
   });
   check('shotgun reloads shell by shell, pumps at the end', s.mid === 4 && s.end === 6 && s.used === 3 && s.sounds.filter((x) => x === 'shotgun_shell').length === 3 && s.sounds.at(-1) === 'shotgun_pump', JSON.stringify(s));
+  // open zone: terrain, river bridge, big map
+  s = await ev(() => {
+    const g = window.__game, W = g.world, T = W.terrain;
+    // player stands on the terrain on a slope
+    const hx = -214, hz = 290; place(hx, hz); g.tick(1 / 60, 20);
+    const onSlope = { y: +g.player.pos.y.toFixed(2), ground: +T.height(g.player.pos.x, g.player.pos.z).toFixed(2), slope: +T.slope(hx, hz).toFixed(2) };
+    // a shot fired down hits the ground; the radio hill blocks sight across it
+    const down = W.raycast({ x: 0, y: 30, z: 150 }, { x: 0, y: -1, z: 0 }, 100);
+    const across = W.lineOfSight({ x: -214, y: T.height(-214, 160) + 1.6, z: 160 }, { x: -214, y: T.height(-214, 340) + 1.6, z: 340 });
+    const peak = T.height(-214, 250);
+    return { onSlope, down: +down.toFixed(2), expect: +(30 - T.height(0, 150)).toFixed(2), across, peak: +peak.toFixed(1), zombiesOnLand: g.zombies.list.every((z) => !T.isWater(z.pos.x, z.pos.z)) };
+  });
+  check('player stands on sloped terrain', Math.abs(s.onSlope.y - s.onSlope.ground) < 0.1 && s.onSlope.slope > 0.05, JSON.stringify(s.onSlope));
+  check('bullets hit the ground', Math.abs(s.down - s.expect) < 0.2, JSON.stringify(s));
+  check('the radio hill blocks line of sight', !s.across && s.peak > 18, JSON.stringify(s));
+  // walk west along the main street across the river bridge
+  await ev(() => { place(-96, 21); window.__game.zombies.spawnT = 1e9; });
+  await page.keyboard.down('KeyW');
+  s = await ev(() => { const g = window.__game, ys = []; for (let i = 0; i < 12 * 60; i++) { g.tick(1 / 60, 1); if (Math.abs(g.player.pos.x + 118) < 3) ys.push(g.player.pos.y); } return { x: +g.player.pos.x.toFixed(1), minYOverRiver: +Math.min(...ys).toFixed(2), samples: ys.length }; });
+  await page.keyboard.up('KeyW');
+  check('bridge carries the player over the river', s.x < -140 && s.samples > 0 && s.minYOverRiver > 0.8, JSON.stringify(s));
+  await ev(() => place(LANE.x, LANE.z));
+  await page.keyboard.press('KeyM');
+  s = await ev(() => ({ state: window.__game.state, map: !document.getElementById('bigmap').hidden, pois: window.__game.world.pois.length }));
+  await page.screenshot({ path: SP + '/map.png' });
+  await page.keyboard.press('KeyM');
+  const back = await ev(() => window.__game.state);
+  check('M opens the zone map and closes it', s.state === 'map' && s.map && s.pois >= 8 && back === 'playing', JSON.stringify(s) + ' back=' + back);
+  // generator sanity on random zones: every door walkable, every house container reachable,
+  // radio console usable, three radio parts, dry spawn and helipad
+  s = await ev(() => {
+    const g = window.__game, res = [];
+    for (let run = 0; run < 5; run++) {
+      g.newGame(); g.state = 'playing'; g.god = true;
+      const w = g.world, P = g.player, T = w.terrain, issues = [];
+      for (const c of w.containers.filter((c) => c.building != null)) {
+        const b = w.buildings[c.building];
+        const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2, dx = cx - c.x, dz = cz - c.z, d = Math.hypot(dx, dz);
+        P.pos.set(c.x + (dx / d) * 1.3, b.floor, c.z + (dz / d) * 1.3); w.collide(P.pos, 0.35, b.floor, 1.75);
+        P.yaw = Math.atan2(-(c.x - P.pos.x), -(c.z - P.pos.z)); P.pitch = -0.3;
+        const it = g.findInteract(); if (!(it && it.obj === c)) issues.push('container:' + (b.name || c.kind));
+      }
+      for (const b of w.buildings.filter((b) => b.door)) {
+        const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
+        P.pos.set(b.door.x, w.groundAt({ x: b.door.x, z: b.door.z }, 0.3, w.ground(b.door.x, b.door.z) + 3, 0.45), b.door.z);
+        for (let i = 0; i < 150; i++) {
+          const dx = i < 70 ? b.doorIn.x : cx - P.pos.x, dz = i < 70 ? b.doorIn.z : cz - P.pos.z, l = Math.hypot(dx, dz) || 1;
+          P.pos.x += (dx / l) * 0.05; P.pos.z += (dz / l) * 0.05;
+          w.collide(P.pos, 0.35, P.pos.y, 1.75); P.pos.y = w.groundAt(P.pos, 0.35, P.pos.y);
+        }
+        if (!(P.pos.x > b.minX && P.pos.x < b.maxX && P.pos.z > b.minZ && P.pos.z < b.maxZ)) issues.push('door:' + (b.name || 'house'));
+      }
+      g.phase = 'radio';
+      const rc = w.radioConsole, rb = w.buildings.find((b) => rc.x > b.minX && rc.x < b.maxX && rc.z > b.minZ && rc.z < b.maxZ);
+      const dx = (rb.minX + rb.maxX) / 2 - rc.x, dz = (rb.minZ + rb.maxZ) / 2 - rc.z, dd = Math.hypot(dx, dz) || 1;
+      P.pos.set(rc.x + (dx / dd) * 1.5, rb.floor, rc.z + (dz / dd) * 1.5); w.collide(P.pos, 0.35, rb.floor, 1.75);
+      P.yaw = Math.atan2(-(rc.x - P.pos.x), -(rc.z - P.pos.z)); P.pitch = -0.3;
+      const it = g.findInteract(); if (!it || it.kind !== 'radio') issues.push('radio console');
+      if (w.radioContainers.length !== 3) issues.push('radio parts: ' + w.radioContainers.length);
+      if (!w.isFree(w.spawn.x, w.spawn.z, 0.5)) issues.push('spawn');
+      if (T.isWater(w.helipad.x, w.helipad.z)) issues.push('helipad');
+      res.push(issues);
+    }
+    return res;
+  });
+  check('5 random zones: doors, containers, radio, spawn, helipad all usable', s.every((r) => r.length === 0), JSON.stringify(s));
   // settings persistence
   await page.keyboard.press('Escape');
   await page.click('#btn-settings2');

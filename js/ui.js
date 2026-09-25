@@ -2,6 +2,7 @@
 import { ITEMS } from './items.js';
 import { WEAPONS, ORDER, FATIGUE } from './weapons.js';
 import { HALF } from './world.js';
+import { clamp } from './util.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -15,7 +16,7 @@ export class UI {
       obj: $('objective-text'), objSub: $('objective-sub'), feed: $('feed'), prompt: $('prompt'),
       progress: $('progress'), progressFill: $('progress-fill'), cross: $('crosshair'), hit: $('hitmarker'),
       compass: $('compass-strip'), kills: $('kills'), minimap: $('minimap'),
-      invGrid: $('inv-grid'), invName: $('inv-name'), invDesc: $('inv-desc'), invCap: $('inv-cap'), invAmmo: $('inv-ammo'),
+      bigmap: $('bigmap-canvas'), invGrid: $('inv-grid'), invName: $('inv-name'), invDesc: $('inv-desc'), invCap: $('inv-cap'), invAmmo: $('inv-ammo'),
     };
     this.mm = this.el.minimap.getContext('2d');
     this.hurtV = 0;
@@ -99,32 +100,52 @@ export class UI {
 
   // ---------- minimap ----------
   drawMapBase() {
-    const w = this.game.world;
-    const S = 1024;
-    const c = document.createElement('canvas');
-    c.width = c.height = S;
-    const g = c.getContext('2d');
-    const k = S / (HALF * 2);
-    const X = (x) => (x + HALF) * k;
-    g.fillStyle = '#2b3122';
-    g.fillRect(0, 0, S, S);
-    g.fillStyle = '#44464a';
-    for (const p of [-60, 0, 60]) {
-      g.fillRect(X(p - 5), 0, 10 * k, S);
-      g.fillRect(0, X(p - 5), S, 10 * k);
+    const { canvas, k } = this.game.world.renderMap(640);
+    this.mapCache = { c: canvas, k };
+  }
+
+  // Full-screen map (M): terrain, roads, buildings, named places, you and the goal.
+  renderBigMap() {
+    const game = this.game;
+    if (!this.mapCache) this.drawMapBase();
+    const cv = this.el.bigmap;
+    const S = Math.min(cv.parentElement.clientWidth - 32, cv.parentElement.clientHeight - 90, 900);
+    cv.width = cv.height = Math.max(200, S);
+    const g = cv.getContext('2d');
+    const W = cv.width;
+    g.drawImage(this.mapCache.c, 0, 0, W, W);
+    const X = (x) => ((x + HALF) / (HALF * 2)) * W;
+    g.font = '600 14px "Barlow Condensed", "Arial Narrow", sans-serif';
+    g.textAlign = 'center';
+    for (const p of game.world.pois) {
+      g.fillStyle = 'rgba(10,12,14,0.55)';
+      const tw = g.measureText(p.name).width + 10;
+      const lx = clamp(X(p.x), tw / 2 + 2, W - tw / 2 - 2); // keep labels inside the map
+      g.fillRect(lx - tw / 2, X(p.z) - 22, tw, 18);
+      g.fillStyle = '#e7e2d4';
+      g.fillText(p.name, lx, X(p.z) - 8);
     }
-    for (const b of w.buildings) {
-      g.fillStyle = b.enterable ? '#8c8370' : '#5d5a55';
-      g.fillRect(X(b.minX), X(b.minZ), (b.maxX - b.minX) * k, (b.maxZ - b.minZ) * k);
+    const obj = game.objectivePos();
+    if (obj) {
+      g.fillStyle = '#e0a13a';
+      g.save();
+      g.translate(X(obj.x), X(obj.z));
+      g.rotate(Math.PI / 4);
+      g.fillRect(-7, -7, 14, 14);
+      g.restore();
     }
-    if (w.helipad) {
-      g.strokeStyle = '#d9b23a';
-      g.lineWidth = 4;
-      g.beginPath();
-      g.arc(X(w.helipad.x), X(w.helipad.z), 8 * k, 0, Math.PI * 2);
-      g.stroke();
-    }
-    this.mapCache = { c, k };
+    const p = game.player;
+    g.save();
+    g.translate(X(p.pos.x), X(p.pos.z));
+    g.rotate(-p.yaw);
+    g.fillStyle = '#ffffff';
+    g.strokeStyle = '#000';
+    g.lineWidth = 2;
+    g.beginPath();
+    g.moveTo(0, -11); g.lineTo(-7, 8); g.lineTo(0, 4); g.lineTo(7, 8); g.closePath();
+    g.stroke();
+    g.fill();
+    g.restore();
   }
 
   drawMinimap() {
@@ -134,7 +155,7 @@ export class UI {
     if (!this.mapCache) this.drawMapBase();
     const { c, k } = this.mapCache;
     const W = this.el.minimap.width;
-    const range = 55; // metres from centre to edge
+    const range = 75; // metres from centre to edge
     const scale = (W / 2) / range; // px per metre
     g.save();
     g.clearRect(0, 0, W, W);

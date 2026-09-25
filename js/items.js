@@ -26,6 +26,9 @@ const TABLES = {
   fridge: [['canned', 4], ['water', 5], ['chips', 3], ['energy', 3]],
   trunk: [['ammo_pistol', 3], ['ammo_shells', 2], ['water', 2], ['canned', 2], ['bandage', 2], ['energy', 1], ['battery', 1], ['w_shotgun', 0.4]],
   military: [['ammo_rifle', 5], ['ammo_shells', 3], ['ammo_pistol', 3], ['medkit', 3], ['w_rifle', 1.2], ['w_shotgun', 1], ['energy', 1]],
+  chest: [['bandage', 3], ['canned', 3], ['chips', 3], ['water', 2], ['battery', 2], ['ammo_shells', 2], ['ammo_pistol', 2], ['w_shotgun', 0.5]],
+  shelf: [['canned', 4], ['chips', 4], ['water', 4], ['energy', 3], ['battery', 2], ['painkillers', 1]],
+  toolbox: [['battery', 4], ['ammo_shells', 2], ['bandage', 1], ['ammo_pistol', 1]],
   zombie: [['ammo_pistol', 4], ['bandage', 3], ['chips', 2], ['water', 2], ['ammo_shells', 1], ['ammo_rifle', 1], ['battery', 1], ['painkillers', 1]],
 };
 

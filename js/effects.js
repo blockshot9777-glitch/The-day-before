@@ -128,7 +128,7 @@ export class Effects {
       h.rotor.rotation.y += dt * 25;
       h.rotor2.rotation.y += dt * 25;
       h.tail.rotation.x += dt * 30;
-      const target = new THREE.Vector3(h.pad.x, 0.15, h.pad.z);
+      const target = new THREE.Vector3(h.pad.x, h.pad.y ?? 0.15, h.pad.z);
       const pos = h.group.position;
       if (!h.landed) {
         const toX = target.x - pos.x, toZ = target.z - pos.z;
@@ -142,7 +142,7 @@ export class Effects {
         } else h.group.rotation.x = 0;
         const wantY = horiz > 30 ? 45 : horiz > 2 ? 12 : target.y;
         pos.y += (wantY - pos.y) * Math.min(1, dt * (horiz > 2 ? 0.8 : 0.6));
-        if (horiz < 1 && pos.y < 0.4) { pos.y = target.y; h.landed = true; }
+        if (horiz < 1 && pos.y < target.y + 0.25) { pos.y = target.y; h.landed = true; }
       }
       h.sndT -= dt;
       if (h.sndT <= 0) {

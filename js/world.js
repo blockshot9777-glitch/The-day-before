@@ -1,13 +1,17 @@
-// The town: procedural layout, static geometry (merged per material), colliders,
-// loot containers, pickups and the day/night sky.
+// World core: terrain, static geometry (merged per material and per 64 m chunk
+// so off-screen chunks are culled), colliders, bullets and sight lines, loot
+// containers, ground pickups and the day/night sky. What stands where is
+// decided in zone.js; trees and wrecks are instanced in nature.js.
 import * as THREE from 'three';
-import { mulberry32, clamp, lerp, smooth, rayAABB, pick } from './util.js';
+import { mulberry32, clamp, lerp, smooth, rayAABB } from './util.js';
 import { rollLoot, ITEMS } from './items.js';
+import { Terrain, WATER_Y, distToPath } from './terrain.js';
+import { PLAN, buildZone } from './zone.js';
+import { Nature } from './nature.js';
 
-export const HALF = 112; // playable area is [-HALF, HALF] on X and Z
-const ROADS = [-60, 0, 60];
-const ROAD_W = 10;
+export const HALF = PLAN.half; // playable area is [-HALF, HALF] on X and Z
 const CELL = 8; // collider grid cell size
+const CHUNK = 128; // static geometry chunk size
 
 // ---------- textures ----------
 function canvasTex(size, draw, repeat = 1) {
@@ -19,7 +23,7 @@ function canvasTex(size, draw, repeat = 1) {
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(repeat, repeat);
   t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 4;
+  t.anisotropy = 8;
   return t;
 }
 
@@ -36,18 +40,36 @@ function speckle(g, s, base, spots, n, minR = 1, maxR = 3) {
 }
 
 function makeTextures() {
-  const grass = canvasTex(256, (g, s) => speckle(g, s, '#4b5534', ['#3b4527', '#5d6640', '#6b6a44', '#403a2a'], 5000, 1, 4), 120);
+  // ground detail: light speckle multiplied over the terrain's vertex colours
+  const ground = canvasTex(256, (g, s) => {
+    speckle(g, s, '#d9d9d9', ['#b8b8b8', '#efefef', '#a6a6a6', '#c8c8c8'], 7000, 1, 4);
+    g.strokeStyle = 'rgba(90,90,90,0.25)';
+    for (let i = 0; i < 70; i++) {
+      const x = Math.random() * s, y = Math.random() * s;
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + (Math.random() - 0.5) * 6, y - 4 - Math.random() * 8);
+      g.stroke();
+    }
+  });
   const asphalt = canvasTex(256, (g, s) => {
-    speckle(g, s, '#333436', ['#2a2b2d', '#3d3e40', '#444447', '#262626'], 6000, 1, 3);
+    speckle(g, s, '#3a3b3d', ['#2a2b2d', '#46474a', '#505053', '#262626'], 6000, 1, 3);
     g.strokeStyle = 'rgba(15,15,15,0.7)';
     g.lineWidth = 1.5;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       g.beginPath();
       let x = Math.random() * s, y = Math.random() * s;
       g.moveTo(x, y);
       for (let k = 0; k < 8; k++) { x += (Math.random() - 0.5) * 40; y += (Math.random() - 0.5) * 40; g.lineTo(x, y); }
       g.stroke();
     }
+  });
+  const dirt = canvasTex(256, (g, s) => {
+    speckle(g, s, '#7a6650', ['#6a5642', '#8a7560', '#5e4c3a', '#94826c'], 7000, 1, 4);
+    // wheel ruts
+    g.fillStyle = 'rgba(60,45,32,0.35)';
+    g.fillRect(s * 0.22, 0, s * 0.12, s);
+    g.fillRect(s * 0.66, 0, s * 0.12, s);
   });
   const grime = canvasTex(256, (g, s) => {
     speckle(g, s, '#e6e6e6', ['#bdbdbd', '#d0d0d0', '#f5f5f5', '#a8a8a8'], 3000, 2, 6);
@@ -56,11 +78,6 @@ function makeTextures() {
     grd.addColorStop(1, 'rgba(60,50,40,0.35)');
     g.fillStyle = grd;
     g.fillRect(0, 0, s, s);
-    for (let i = 0; i < 12; i++) {
-      g.fillStyle = 'rgba(70,60,50,0.12)';
-      const x = Math.random() * s;
-      g.fillRect(x, 0, 3 + Math.random() * 8, s * (0.3 + Math.random() * 0.7));
-    }
   });
   const brick = canvasTex(256, (g, s) => {
     g.fillStyle = '#b8b0a4';
@@ -73,6 +90,46 @@ function makeTextures() {
         g.fillStyle = `rgb(${v},${v * 0.55},${v * 0.42})`;
         g.fillRect(x + off + 1, y + 1, bw - 2, bh - 2);
       }
+    }
+  });
+  // round logs of an izba, stacked horizontally
+  const logs = canvasTex(256, (g, s) => {
+    const h = 32;
+    for (let y = 0; y < s; y += h) {
+      const grd = g.createLinearGradient(0, y, 0, y + h);
+      const v = 105 + Math.random() * 30;
+      grd.addColorStop(0, `rgb(${v * 0.55},${v * 0.42},${v * 0.3})`);
+      grd.addColorStop(0.45, `rgb(${v},${v * 0.78},${v * 0.56})`);
+      grd.addColorStop(1, `rgb(${v * 0.45},${v * 0.34},${v * 0.24})`);
+      g.fillStyle = grd;
+      g.fillRect(0, y, s, h);
+      g.fillStyle = 'rgba(40,28,18,0.5)';
+      for (let k = 0; k < 6; k++) g.fillRect(Math.random() * s, y + 4 + Math.random() * (h - 8), 12 + Math.random() * 30, 1);
+    }
+  });
+  // painted vertical planks, paint peeling
+  const planks = canvasTex(256, (g, s) => {
+    g.fillStyle = '#dcdcdc';
+    g.fillRect(0, 0, s, s);
+    for (let x = 0; x < s; x += 21) {
+      g.fillStyle = 'rgba(0,0,0,0.35)';
+      g.fillRect(x, 0, 2, s);
+    }
+    for (let i = 0; i < 90; i++) {
+      g.fillStyle = `rgba(${90 + Math.random() * 40},${70 + Math.random() * 30},${50},${0.35 + Math.random() * 0.4})`;
+      g.fillRect(Math.random() * s, Math.random() * s, 3 + Math.random() * 14, 2 + Math.random() * 6);
+    }
+  });
+  // corrugated roofing sheets
+  const roofing = canvasTex(128, (g, s) => {
+    for (let x = 0; x < s; x++) {
+      const v = 150 + Math.sin((x / s) * Math.PI * 16) * 45;
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.fillRect(x, 0, 1, s);
+    }
+    for (let i = 0; i < 40; i++) {
+      g.fillStyle = `rgba(120,60,30,${0.2 + Math.random() * 0.4})`;
+      g.fillRect(Math.random() * s, Math.random() * s, 2 + Math.random() * 10, 4 + Math.random() * 20);
     }
   });
   const wood = canvasTex(128, (g, s) => {
@@ -89,12 +146,26 @@ function makeTextures() {
     g.strokeStyle = 'rgba(40,40,40,0.35)';
     g.strokeRect(0, 0, s, s);
   });
-  return { grass, asphalt, grime, brick, wood, concrete };
+  const stone = canvasTex(256, (g, s) => {
+    g.fillStyle = '#6f6a62';
+    g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 60; i++) {
+      const v = 90 + Math.random() * 60;
+      g.fillStyle = `rgb(${v},${v * 0.96},${v * 0.9})`;
+      g.beginPath();
+      g.ellipse(Math.random() * s, Math.random() * s, 10 + Math.random() * 18, 7 + Math.random() * 10, Math.random() * 3, 0, Math.PI * 2);
+      g.fill();
+    }
+  });
+  const hay = canvasTex(128, (g, s) => {
+    speckle(g, s, '#c9a55a', ['#b08a42', '#dcbc70', '#9c7a38', '#e6cb86'], 3000, 1, 5);
+  });
+  return { ground, asphalt, dirt, grime, brick, logs, planks, roofing, wood, concrete, stone, hay };
 }
 
 // ---------- geometry helpers ----------
 // Box whose UVs are scaled to world units so textures don't stretch.
-function boxGeo(w, h, d, tile) {
+export function boxGeo(w, h, d, tile) {
   const g = new THREE.BoxGeometry(w, h, d);
   if (tile) {
     const uv = g.attributes.uv;
@@ -148,6 +219,7 @@ function mergeGeos(geos) {
 
 const CONTAINER_LABEL = {
   crate: 'ящик', cabinet: 'шкафчик', fridge: 'холодильник', trunk: 'багажник', military: 'военный ящик', desk: 'стол',
+  chest: 'сундук', shelf: 'стеллаж', toolbox: 'ящик с инструментами',
 };
 
 export class World {
@@ -155,18 +227,26 @@ export class World {
     this.scene = scene;
     this.lootMul = opts.lootMul ?? 1;
     this.rng = mulberry32(opts.seed ?? 1987);
+    this.assets = opts.assets || {};
     this.colliders = [];
     this.grid = new Map();
     this.stamp = 0;
     this.containers = [];
-    this.buildings = []; // {minX,maxX,minZ,maxZ,enterable}
+    this.buildings = []; // {minX,maxX,minZ,maxZ,enterable,floor}
     this.pickups = [];
-    this.statics = new Map(); // material -> geometries
+    this.roads = []; // {pts, w, kind}
+    this.fields = []; // {minX,maxX,minZ,maxZ}
+    this.pois = []; // named places for the map
+    this.statics = new Map(); // "chunk|material id" -> {mat, geos}
     this.tex = makeTextures();
     this.mats = this.makeMaterials();
     this.dynamic = new THREE.Group();
     scene.add(this.dynamic);
-    this.build();
+    this.terrain = new Terrain(this.rng, PLAN);
+    this.nature = new Nature(this, this.assets.nature);
+    buildZone(this);
+    this.addTerrain();
+    this.nature.finalize();
     this.finalize();
     this.makeSky();
   }
@@ -174,46 +254,65 @@ export class World {
   makeMaterials() {
     const t = this.tex;
     const std = (o) => new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, ...o });
-    return {
-      grass: std({ map: t.grass }),
+    const m = {
+      terrain: std({ map: t.ground, vertexColors: true, roughness: 1 }),
       asphalt: std({ map: t.asphalt }),
-      sidewalk: std({ map: t.concrete, color: 0xb0aea6 }),
+      dirtRoad: std({ map: t.dirt }),
       concrete: std({ map: t.concrete }),
       line: std({ color: 0xcfc6a0 }),
       plasterA: std({ map: t.grime, color: 0xc9bfa6 }),
       plasterB: std({ map: t.grime, color: 0x9fa89a }),
-      plasterC: std({ map: t.grime, color: 0xb58f78 }),
-      plasterD: std({ map: t.grime, color: 0x8f99a6 }),
+      whitewash: std({ map: t.grime, color: 0xe8e4d8 }),
       brick: std({ map: t.brick }),
+      logs: std({ map: t.logs }),
+      logsDark: std({ map: t.logs, color: 0x8a7a6a }),
+      planksBlue: std({ map: t.planks, color: 0x6d8aa0 }),
+      planksGreen: std({ map: t.planks, color: 0x7f9a6a }),
+      planksOchre: std({ map: t.planks, color: 0xc9a060 }),
+      planksGrey: std({ map: t.planks, color: 0x9a968c }),
+      trim: std({ color: 0xe6e2d6 }),
+      trimBlue: std({ color: 0x4f7ca8 }),
+      roofMetal: std({ map: t.roofing, color: 0x8b9aa0, roughness: 0.6, metalness: 0.35, side: THREE.DoubleSide }),
+      roofRust: std({ map: t.roofing, color: 0xa0674a, roughness: 0.75, metalness: 0.25, side: THREE.DoubleSide }),
+      roofGreen: std({ map: t.roofing, color: 0x5d7a5a, roughness: 0.65, metalness: 0.3, side: THREE.DoubleSide }),
       roof: std({ color: 0x3a3634 }),
+      stone: std({ map: t.stone }),
       glass: std({ color: 0x1c262b, roughness: 0.25, metalness: 0.4 }),
       glassLit: std({ color: 0x2a2418, emissive: 0xffb65c, emissiveIntensity: 0 }),
       wood: std({ map: t.wood }),
       darkWood: std({ map: t.wood, color: 0x6b5b4b }),
+      fence: std({ map: t.wood, color: 0x8f8472 }),
       metal: std({ color: 0x6d7274, roughness: 0.6, metalness: 0.5 }),
       rust: std({ color: 0x7a4a2e, roughness: 0.8, metalness: 0.3 }),
       white: std({ color: 0xd8d8d2, roughness: 0.5 }),
+      stove: std({ map: t.grime, color: 0xf0ece2 }),
+      gold: std({ color: 0xc9a23a, roughness: 0.35, metalness: 0.8 }),
+      domeBlue: std({ color: 0x3f6aa0, roughness: 0.5, metalness: 0.3 }),
       carRed: std({ color: 0x7a2a22, roughness: 0.6, metalness: 0.3 }),
-      carBlue: std({ color: 0x3a5068, roughness: 0.6, metalness: 0.3 }),
-      carWhite: std({ color: 0xb8b6ae, roughness: 0.6, metalness: 0.3 }),
-      carGreen: std({ color: 0x4b5a3a, roughness: 0.6, metalness: 0.3 }),
       tire: std({ color: 0x151515 }),
-      bark: std({ color: 0x4a3a2c }),
-      leaves: std({ color: 0x3d5230, flatShading: true }),
-      leaves2: std({ color: 0x5a5a2e, flatShading: true }),
       crate: std({ map: t.wood, color: 0x9c7b52 }),
       olive: std({ color: 0x4f5a35, roughness: 0.85 }),
       sandbag: std({ color: 0x8e7f5e, roughness: 1, flatShading: true }),
+      hay: std({ map: t.hay }),
+      soil: std({ map: t.dirt, color: 0x6b5a48 }),
       yellow: std({ color: 0xd9b23a }),
       red: std({ color: 0x8c1f1a }),
       blood: std({ color: 0x3d0a08, roughness: 0.4 }),
+      water: new THREE.MeshStandardMaterial({ color: 0x3c5a5e, roughness: 0.08, metalness: 0.2, transparent: true, opacity: 0.82 }),
     };
+    let id = 0;
+    for (const v of Object.values(m)) v.userData.id = id++;
+    return m;
   }
 
   // ---------- primitives ----------
   addGeo(geo, mat) {
-    if (!this.statics.has(mat)) this.statics.set(mat, []);
-    this.statics.get(mat).push(geo);
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    const cx = Math.floor(((bb.min.x + bb.max.x) / 2) / CHUNK), cz = Math.floor(((bb.min.z + bb.max.z) / 2) / CHUNK);
+    const key = `${cx},${cz}|${mat.userData.id}`;
+    if (!this.statics.has(key)) this.statics.set(key, { mat, geos: [] });
+    this.statics.get(key).geos.push(geo);
   }
 
   // Box centred on x/z with its bottom at y. Returns the collider (if any).
@@ -228,19 +327,43 @@ export class World {
   // What a bullet hitting this material sounds like.
   soundMat(mat) {
     const m = this.mats;
-    if ([m.carRed, m.carBlue, m.carWhite, m.carGreen, m.rust, m.metal, m.tire, m.olive].includes(mat)) return 'metal';
-    if ([m.wood, m.darkWood, m.crate].includes(mat)) return 'wood';
+    if ([m.carRed, m.rust, m.metal, m.tire, m.olive, m.roofMetal, m.roofRust, m.roofGreen].includes(mat)) return 'metal';
+    if ([m.wood, m.darkWood, m.crate, m.logs, m.logsDark, m.fence, m.planksBlue, m.planksGreen, m.planksOchre, m.planksGrey].includes(mat)) return 'wood';
     return 'hard';
+  }
+
+  ground(x, z) {
+    return this.terrain.height(x, z);
   }
 
   // Ground type under a point, for footstep sounds.
   surfaceAt(x, y, z) {
     const b = this.insideBuilding(x, z);
-    if (b && b.enterable && y >= 0.05) return 'wood';
-    if (b) return 'hard';
-    if (this.onRoad(x, z, 2.5)) return 'hard';
-    if (this.helipad && Math.abs(x - this.helipad.x) < 11 && Math.abs(z - this.helipad.z) < 11) return 'hard';
+    if (b && b.enterable && y >= b.floor - 0.05) return 'wood';
+    if (this.terrain.isWater(x, z) && y < WATER_Y + 0.3) return 'mud';
+    const road = this.roadAt(x, z);
+    if (road) return road.kind === 'asphalt' ? 'hard' : 'gravel';
+    if (this.inForest(x, z)) return 'leaves';
     return 'grass';
+  }
+
+  roadAt(x, z, pad = 0) {
+    for (const r of this.roads) {
+      if (distToPath(x, z, r.pts) < r.w / 2 + pad) return r;
+    }
+    return null;
+  }
+
+  onRoad(x, z, pad = 0) {
+    return !!this.roadAt(x, z, pad);
+  }
+
+  inField(x, z, pad = 0) {
+    return this.fields.some((f) => x > f.minX - pad && x < f.maxX + pad && z > f.minZ - pad && z < f.maxZ + pad);
+  }
+
+  inForest(x, z) {
+    return this.nature.density(x, z) > 0.55;
   }
 
   addCollider(minX, minY, minZ, maxX, maxY, maxZ) {
@@ -284,7 +407,7 @@ export class World {
       if (c.maxY <= feetY + step || c.minY >= feetY + height) continue;
       const cx = clamp(pos.x, c.minX, c.maxX);
       const cz = clamp(pos.z, c.minZ, c.maxZ);
-      let dx = pos.x - cx, dz = pos.z - cz;
+      const dx = pos.x - cx, dz = pos.z - cz;
       const d2 = dx * dx + dz * dz;
       if (d2 >= radius * radius) continue;
       hit = true;
@@ -302,7 +425,7 @@ export class World {
         else pos.z = c.maxZ + radius;
       }
     }
-    const lim = HALF - radius;
+    const lim = HALF - 2 - radius;
     if (pos.x < -lim) { pos.x = -lim; hit = true; }
     if (pos.x > lim) { pos.x = lim; hit = true; }
     if (pos.z < -lim) { pos.z = -lim; hit = true; }
@@ -310,9 +433,10 @@ export class World {
     return hit;
   }
 
-  // Highest surface under the cylinder that is at most `step` above the feet.
+  // Highest surface under the cylinder: the terrain or a collider top that is
+  // at most `step` above the feet.
   groundAt(pos, radius, feetY, step = 0.45) {
-    let g = 0;
+    let g = this.terrain.height(pos.x, pos.z);
     const list = this.query(pos.x - radius, pos.z - radius, pos.x + radius, pos.z + radius, this._q || (this._q = []));
     for (const c of list) {
       if (c.maxY > feetY + step || c.maxY <= g) continue;
@@ -324,12 +448,11 @@ export class World {
     return g;
   }
 
-  // Distance along a ray to the first solid surface (colliders + ground).
+  // Distance along a ray to the first solid surface (colliders + terrain).
   // The collider that was hit is left in this.lastHit (null for the ground).
   raycast(o, d, maxT = 200) {
-    let best = maxT;
     this.lastHit = null;
-    if (d.y < -1e-6) best = Math.min(best, -o.y / d.y);
+    let best = Math.min(maxT, this.terrain.raycast(o, d, maxT));
     // Walk the grid cells the ray passes through (coarse: sample along the ray).
     const s = ++this.stamp;
     const stepLen = CELL * 0.5;
@@ -360,7 +483,6 @@ export class World {
     return this.raycast(a, d, len) >= len - 0.05;
   }
 
-  // Inside a building footprint (used by the spawner and by the sky light check).
   insideBuilding(x, z, pad = 0) {
     for (const b of this.buildings) {
       if (x > b.minX - pad && x < b.maxX + pad && z > b.minZ - pad && z < b.maxZ + pad) return b;
@@ -368,21 +490,17 @@ export class World {
     return null;
   }
 
+  // Free standing spot on dry land (spawns, scatter).
   isFree(x, z, r) {
-    if (Math.abs(x) > HALF - r || Math.abs(z) > HALF - r) return false;
+    if (Math.abs(x) > HALF - 4 - r || Math.abs(z) > HALF - 4 - r) return false;
+    if (this.terrain.isWater(x, z)) return false;
+    const gy = this.terrain.height(x, z);
     const list = this.query(x - r, z - r, x + r, z + r, []);
     for (const c of list) {
-      if (c.maxY < 0.5) continue;
+      if (c.maxY < gy + 0.5) continue;
       if (x + r > c.minX && x - r < c.maxX && z + r > c.minZ && z - r < c.maxZ) return false;
     }
     return !this.insideBuilding(x, z, 0.5);
-  }
-
-  onRoad(x, z, pad = 0) {
-    for (const r of ROADS) {
-      if (Math.abs(x - r) < ROAD_W / 2 + pad || Math.abs(z - r) < ROAD_W / 2 + pad) return true;
-    }
-    return false;
   }
 
   // ---------- containers & pickups ----------
@@ -417,460 +535,126 @@ export class World {
     this.pickups.splice(this.pickups.indexOf(p), 1);
   }
 
-  // ---------- town ----------
-  build() {
-    const m = this.mats;
+  // ---------- terrain, water, roads ----------
+  terrainColor(x, z, h, out) {
+    const t = this.terrain;
+    const n = t.fbm(x / 35, z / 35, 3);
+    // meadow green with dry patches
+    out.setRGB(0.36 + n * 0.06, 0.42 + n * 0.05, 0.22 + n * 0.03);
+    const dry = smooth(clamp(t.fbm(x / 90 + 40, z / 90, 2) * 2 + 0.2, 0, 1));
+    out.lerp(new THREE.Color(0.55, 0.5, 0.3), dry * 0.35);
+    if (this.inField(x, z)) out.lerp(new THREE.Color(0.78, 0.66, 0.36), 0.85);
+    const forest = this.nature.density(x, z);
+    if (forest > 0.4) out.lerp(new THREE.Color(0.28, 0.26, 0.16), smooth(clamp((forest - 0.4) * 2.5, 0, 1)) * 0.7);
+    // wet sand and mud at the water line
+    if (h < WATER_Y + 0.9) out.lerp(new THREE.Color(0.45, 0.4, 0.3), smooth(clamp((WATER_Y + 0.9 - h) / 1.2, 0, 1)));
+    // rock on steep slopes
+    const sl = t.slope(x, z);
+    if (sl > 0.35) out.lerp(new THREE.Color(0.45, 0.43, 0.4), smooth(clamp((sl - 0.35) * 3, 0, 1)));
+  }
 
-    // Ground, roads, sidewalks
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), m.grass);
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    this.scene.add(ground);
+  addTerrain() {
+    const mesh = this.terrain.buildMesh((x, z, h, c) => this.terrainColor(x, z, h, c), this.mats.terrain, 3);
+    this.scene.add(mesh);
+    this.terrainMesh = mesh;
+    // one water sheet: the ground covers it everywhere except the river and lake
+    const water = new THREE.Mesh(new THREE.PlaneGeometry(HALF * 2, HALF * 2), this.mats.water);
+    water.rotation.x = -Math.PI / 2;
+    water.position.y = WATER_Y;
+    water.receiveShadow = true;
+    this.scene.add(water);
+  }
 
-    const L = HALF * 2 + 4;
-    for (const p of ROADS) {
-      this.box(p, 0, 0, ROAD_W + 5, 0.025, L, m.sidewalk, false, 3);
-      this.box(0, 0, p, L, 0.025, ROAD_W + 5, m.sidewalk, false, 3);
-    }
-    for (const p of ROADS) {
-      this.box(p, 0, 0, ROAD_W, 0.045, L, m.asphalt, false, 6);
-      this.box(0, 0, p, L, 0.045, ROAD_W, m.asphalt, false, 6);
-    }
-    for (const p of ROADS) {
-      for (let s = -HALF; s < HALF; s += 7) {
-        if (ROADS.some((q) => Math.abs(s + 1.5 - q) < ROAD_W / 2 + 1)) continue;
-        this.box(p, 0.045, s + 1.5, 0.18, 0.008, 3, m.line, false, 0);
-        this.box(s + 1.5, 0.045, p, 3, 0.008, 0.18, m.line, false, 0);
+  // Road ribbon draped over the terrain; skipped where a bridge carries it.
+  addRoad(pts, w, kind) {
+    this.roads.push({ pts, w, kind });
+    const mat = kind === 'asphalt' ? this.mats.asphalt : this.mats.dirtRoad;
+    const step = 3;
+    for (let s = 0; s < pts.length - 1; s++) {
+      const [ax, az] = pts[s], [bx, bz] = pts[s + 1];
+      const len = Math.hypot(bx - ax, bz - az);
+      const n = Math.max(1, Math.round(len / step));
+      const dx = (bx - ax) / len, dz = (bz - az) / len;
+      const px = -dz * (w / 2), pz = dx * (w / 2);
+      const pos = [], uv = [], idx = [];
+      let v = 0;
+      for (let i = 0; i <= n; i++) {
+        const x = ax + (bx - ax) * (i / n), z = az + (bz - az) * (i / n);
+        const lx = x + px, lz = z + pz, rx = x - px, rz = z - pz;
+        pos.push(lx, this.terrain.height(lx, lz) + 0.06, lz, rx, this.terrain.height(rx, rz) + 0.06, rz);
+        const u = (s * 1000 + (i / n) * len) / (w * 1.5);
+        uv.push(0, u, 1, u);
+        // counter-clockwise seen from above, so the ribbon faces up
+        if (i > 0) idx.push(v - 2, v, v - 1, v - 1, v, v + 1);
+        v += 2;
       }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      this.addGeo(g, mat);
     }
-
-    // Perimeter wall
-    const WH = 4.2;
-    this.box(0, 0, -HALF - 0.5, L, WH, 1, m.concrete, true, 3);
-    this.box(0, 0, HALF + 0.5, L, WH, 1, m.concrete, true, 3);
-    this.box(-HALF - 0.5, 0, 0, 1, WH, L, m.concrete, true, 3);
-    this.box(HALF + 0.5, 0, 0, 1, WH, L, m.concrete, true, 3);
-    for (let s = -HALF; s <= HALF; s += 12) {
-      for (const [x, z] of [[s, -HALF - 0.5], [s, HALF + 0.5], [-HALF - 0.5, s], [HALF + 0.5, s]]) {
-        this.box(x, WH, z, 0.12, 1.2, 0.12, m.rust, false);
-      }
-    }
-
-    // Blocks between roads: [a, b] intervals on each axis
-    const spans = [[-HALF + 2, -65], [-55, -5], [5, 55], [65, HALF - 2]];
-    const special = {
-      '3,0': 'tower',
-      '0,3': 'helipad',
-      '1,2': 'park',
-    };
-    for (let ix = 0; ix < 4; ix++) {
-      for (let iz = 0; iz < 4; iz++) {
-        const [x0, x1] = spans[ix];
-        const [z0, z1] = spans[iz];
-        const kind = special[`${ix},${iz}`];
-        if (kind === 'tower') this.buildTower(x0, x1, z0, z1);
-        else if (kind === 'helipad') this.buildHelipad(x0, x1, z0, z1);
-        else if (kind === 'park') this.buildPark(x0, x1, z0, z1);
-        else this.buildBlock(x0, x1, z0, z1);
-      }
-    }
-
-    this.buildCheckpoint(0, 0);
-    this.scatterCars();
-    this.scatterLamps();
-    this.scatterTrees(70);
-    this.placeRadioParts();
-  }
-
-  // Door faces the closest road edge of the block.
-  doorSideFor(cx, cz) {
-    let best = null, bd = Infinity;
-    for (const p of ROADS) {
-      const dx = Math.abs(cx - p), dz = Math.abs(cz - p);
-      if (dx < bd) { bd = dx; best = cx < p ? 'E' : 'W'; }
-      if (dz < bd) { bd = dz; best = cz < p ? 'S' : 'N'; }
-    }
-    return best;
-  }
-
-  buildBlock(x0, x1, z0, z1) {
-    const r = this.rng;
-    const placed = [];
-    const tries = 40;
-    let count = 0;
-    const target = 2 + Math.floor(r() * 3);
-    for (let t = 0; t < tries && count < target; t++) {
-      const tall = r() < 0.3;
-      const w = tall ? 10 + r() * 8 : 8 + r() * 5;
-      const d = tall ? 10 + r() * 6 : 7 + r() * 5;
-      const cx = x0 + 3 + w / 2 + r() * Math.max(0, x1 - x0 - 6 - w);
-      const cz = z0 + 3 + d / 2 + r() * Math.max(0, z1 - z0 - 6 - d);
-      const rect = { minX: cx - w / 2 - 3, maxX: cx + w / 2 + 3, minZ: cz - d / 2 - 3, maxZ: cz + d / 2 + 3 };
-      if (rect.minX < x0 - 1 || rect.maxX > x1 + 1 || rect.minZ < z0 - 1 || rect.maxZ > z1 + 1) continue;
-      if (placed.some((p) => rect.minX < p.maxX && rect.maxX > p.minX && rect.minZ < p.maxZ && rect.maxZ > p.minZ)) continue;
-      placed.push(rect);
-      count++;
-      if (tall) this.buildApartment(cx, cz, w, d);
-      else this.buildHouse(cx, cz, w, d, this.doorSideFor(cx, cz));
-    }
-    // Yard clutter
-    for (let i = 0; i < 4; i++) {
-      const x = lerp(x0 + 2, x1 - 2, r()), z = lerp(z0 + 2, z1 - 2, r());
-      if (placed.some((p) => x > p.minX - 1 && x < p.maxX + 1 && z > p.minZ - 1 && z < p.maxZ + 1)) continue;
-      if (r() < 0.55) {
-        this.box(x, 0, z, 1, 1, 1, this.mats.crate, true, 1);
-        if (r() < 0.6) this.addContainer(x, 0.5, z, 'crate');
-        if (r() < 0.4) this.box(x + 0.2, 1, z - 0.1, 0.8, 0.8, 0.8, this.mats.crate, true, 1);
-      } else {
-        this.barrel(x, z);
-      }
-    }
-  }
-
-  barrel(x, z) {
-    const g = new THREE.CylinderGeometry(0.35, 0.35, 1, 10).translate(x, 0.5, z);
-    this.addGeo(g, this.rng() < 0.5 ? this.mats.rust : this.mats.carBlue);
-    this.addCollider(x - 0.35, 0, z - 0.35, x + 0.35, 1, z + 0.35);
-  }
-
-  buildHouse(cx, cz, w, d, door, opts = {}) {
-    const m = this.mats;
-    const r = this.rng;
-    const H = 3.4, T = 0.3;
-    const wall = opts.wall || pick([m.plasterA, m.plasterB, m.plasterC, m.plasterD, m.brick], r);
-    const minX = cx - w / 2, maxX = cx + w / 2, minZ = cz - d / 2, maxZ = cz + d / 2;
-    this.buildings.push({ minX, maxX, minZ, maxZ, enterable: true });
-
-    // floor
-    this.box(cx, 0, cz, w - 0.1, 0.12, d - 0.1, m.wood, true, 2);
-    const doorW = 1.6, doorH = 2.4;
-    // walls: N (minZ), S (maxZ) run along X; W (minX), E (maxX) run along Z
-    const sides = {
-      N: { along: 'x', fixed: minZ + T / 2, a: minX, b: maxX },
-      S: { along: 'x', fixed: maxZ - T / 2, a: minX, b: maxX },
-      W: { along: 'z', fixed: minX + T / 2, a: minZ + T, b: maxZ - T },
-      E: { along: 'z', fixed: maxX - T / 2, a: minZ + T, b: maxZ - T },
-    };
-    let doorPos = null;
-    for (const [side, s] of Object.entries(sides)) {
-      const len = s.b - s.a;
-      const seg = (a, b, y0, y1) => {
-        if (b - a < 0.05) return;
-        const mid = (a + b) / 2, l = b - a;
-        if (s.along === 'x') this.box(mid, y0, s.fixed, l, y1 - y0, T, wall, true, 2.5);
-        else this.box(s.fixed, y0, mid, T, y1 - y0, l, wall, true, 2.5);
-      };
-      const outward = side === 'N' || side === 'W' ? -1 : 1;
-      const windows = [];
-      if (side === door) {
-        const dc = s.a + len / 2 + (r() - 0.5) * Math.max(0, len - doorW - 3);
-        seg(s.a, dc - doorW / 2, 0, H);
-        seg(dc + doorW / 2, s.b, 0, H);
-        seg(dc - doorW / 2, dc + doorW / 2, doorH, H);
-        doorPos = s.along === 'x' ? { x: dc, z: s.fixed + outward * 1.2 } : { x: s.fixed + outward * 1.2, z: dc };
-        if (dc - s.a > 3) windows.push((s.a + dc - doorW / 2) / 2);
-        if (s.b - dc > 3) windows.push((dc + doorW / 2 + s.b) / 2);
-      } else {
-        seg(s.a, s.b, 0, H);
-        const n = Math.max(1, Math.floor(len / 3.5));
-        for (let i = 0; i < n; i++) windows.push(s.a + ((i + 0.5) * len) / n);
-      }
-      for (const p of windows) {
-        const off = s.fixed + outward * (T / 2 + 0.02);
-        const mat = r() < 0.12 ? m.glassLit : m.glass;
-        if (s.along === 'x') this.box(p, 1.1, off, 1.2, 1.1, 0.04, mat, false, 0);
-        else this.box(off, 1.1, p, 0.04, 1.1, 1.2, mat, false, 0);
-      }
-    }
-    // roof with a small overhang and a parapet
-    this.box(cx, H, cz, w + 0.4, 0.3, d + 0.4, m.roof, true, 0);
-    this.box(cx, H + 0.3, minZ - 0.1, w + 0.4, 0.4, 0.2, wall, false, 2);
-    this.box(cx, H + 0.3, maxZ + 0.1, w + 0.4, 0.4, 0.2, wall, false, 2);
-
-    // interior: furniture against the back wall + a table
-    const back = { N: 'S', S: 'N', E: 'W', W: 'E' }[door];
-    const inset = T + 0.45;
-    const along = (t) => {
-      if (back === 'N') return { x: lerp(minX + 1.2, maxX - 1.2, t), z: minZ + inset, rot: 'x' };
-      if (back === 'S') return { x: lerp(minX + 1.2, maxX - 1.2, t), z: maxZ - inset, rot: 'x' };
-      if (back === 'W') return { x: minX + inset, z: lerp(minZ + 1.2, maxZ - 1.2, t), rot: 'z' };
-      return { x: maxX - inset, z: lerp(minZ + 1.2, maxZ - 1.2, t), rot: 'z' };
-    };
-    const furniture = opts.furniture || [pick(['cabinet', 'fridge', 'crate'], r), pick(['cabinet', 'desk', 'fridge'], r)];
-    furniture.forEach((kind, i) => {
-      const p = along(furniture.length === 1 ? 0.5 : i === 0 ? 0.15 + r() * 0.2 : 0.65 + r() * 0.2);
-      const [fw, fh, fd, mat] = {
-        cabinet: [1.2, 1.8, 0.5, m.darkWood],
-        fridge: [0.8, 1.9, 0.7, m.white],
-        crate: [1, 1, 1, m.crate],
-        desk: [1.6, 0.8, 0.8, m.wood],
-        military: [1.2, 0.7, 0.7, m.olive],
-        console: [1.8, 1.1, 0.7, m.metal],
-      }[kind];
-      const sx = p.rot === 'x' ? fw : fd, sz = p.rot === 'x' ? fd : fw;
-      this.box(p.x, 0.12, p.z, sx, fh, sz, mat, true, 1);
-      if (kind === 'console') {
-        this.box(p.x, 1.22, p.z, sx * 0.9, 0.5, sz * 0.5, m.glassLit, false, 0);
-        this.radioConsole = { x: p.x, y: 1.2, z: p.z };
-      } else {
-        const c = this.addContainer(p.x, 0.12 + Math.min(fh, 1.2), p.z, kind);
-        c.building = this.buildings.length - 1;
-      }
-    });
-    if (!opts.noTable && w > 8.5 && d > 7.5) {
-      this.box(cx, 0.12, cz, 1.4, 0.75, 0.9, m.wood, true, 1);
-    }
-    return doorPos;
-  }
-
-  buildApartment(cx, cz, w, d) {
-    const m = this.mats;
-    const r = this.rng;
-    const floors = 3 + Math.floor(r() * 3);
-    const H = floors * 3;
-    const wall = pick([m.plasterA, m.plasterB, m.plasterD, m.brick], r);
-    this.box(cx, 0, cz, w, H, d, wall, true, 3);
-    this.box(cx, H, cz, w + 0.3, 0.4, d + 0.3, m.roof, false, 0);
-    this.buildings.push({ minX: cx - w / 2, maxX: cx + w / 2, minZ: cz - d / 2, maxZ: cz + d / 2, enterable: false });
-    for (let f = 0; f < floors; f++) {
-      const y = f * 3 + 1;
-      for (const [len, along] of [[w, 'x'], [d, 'z']]) {
-        const n = Math.floor(len / 2.6);
-        for (let i = 0; i < n; i++) {
-          const p = -len / 2 + ((i + 0.5) * len) / n;
-          const mat = r() < 0.08 ? m.glassLit : m.glass;
-          if (along === 'x') {
-            this.box(cx + p, y, cz - d / 2 - 0.02, 1.3, 1.4, 0.05, mat, false, 0);
-            this.box(cx + p, y, cz + d / 2 + 0.02, 1.3, 1.4, 0.05, mat, false, 0);
-          } else {
-            this.box(cx - w / 2 - 0.02, y, cz + p, 0.05, 1.4, 1.3, mat, false, 0);
-            this.box(cx + w / 2 + 0.02, y, cz + p, 0.05, 1.4, 1.3, mat, false, 0);
-          }
-        }
-      }
-    }
-  }
-
-  buildTower(x0, x1, z0, z1) {
-    const m = this.mats;
-    const cx = (x0 + x1) / 2 + 4, cz = (z0 + z1) / 2 + 4;
-    this.towerPos = { x: cx, z: cz };
-    const S = 3.2, H = 28;
-    // lattice mast
-    for (const [dx, dz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      this.box(cx + (dx * S) / 2, 0, cz + (dz * S) / 2, 0.3, H, 0.3, m.rust, true, 0);
-    }
-    for (let y = 2; y < H; y += 3) {
-      this.box(cx, y, cz - S / 2, S, 0.15, 0.15, m.rust, false, 0);
-      this.box(cx, y, cz + S / 2, S, 0.15, 0.15, m.rust, false, 0);
-      this.box(cx - S / 2, y, cz, 0.15, 0.15, S, m.rust, false, 0);
-      this.box(cx + S / 2, y, cz, 0.15, 0.15, S, m.rust, false, 0);
-    }
-    this.box(cx, H, cz, 0.2, 4, 0.2, m.metal, false, 0);
-    // blinking beacon (dynamic)
-    this.beacon = new THREE.Mesh(
-      new THREE.SphereGeometry(0.35, 10, 8),
-      new THREE.MeshBasicMaterial({ color: 0xff2a1a, fog: false }),
-    );
-    this.beacon.position.set(cx, H + 4.2, cz);
-    this.scene.add(this.beacon);
-    // radio booth with the console
-    this.buildHouse(cx - 12, cz + 10, 6, 5, this.doorSideFor(cx - 12, cz + 10), { wall: m.concrete, furniture: ['console'], noTable: true });
-    // fence of crates & a generator
-    this.box(cx + 6, 0, cz + 6, 2.2, 1.3, 1.2, m.olive, true, 1);
-    this.addContainer(cx + 6, 1.3, cz + 6, 'military');
-    this.barrel(cx - 5, cz - 4);
-    this.barrel(cx - 4.2, cz - 4.6);
-  }
-
-  buildHelipad(x0, x1, z0, z1) {
-    const m = this.mats;
-    const cx = (x0 + x1) / 2 - 4, cz = (z0 + z1) / 2 + 4;
-    this.helipad = { x: cx, z: cz };
-    this.box(cx, 0, cz, 22, 0.14, 22, m.concrete, true, 4);
-    // H marking
-    this.box(cx - 2.5, 0.14, cz, 1, 0.01, 7, m.yellow, false, 0);
-    this.box(cx + 2.5, 0.14, cz, 1, 0.01, 7, m.yellow, false, 0);
-    this.box(cx, 0.14, cz, 4, 0.01, 1, m.yellow, false, 0);
-    const ring = new THREE.RingGeometry(7.5, 8.2, 40).rotateX(-Math.PI / 2).translate(cx, 0.155, cz);
-    this.addGeo(ring, m.yellow);
-    // sandbag ring with gaps facing the roads
-    for (let a = 0; a < Math.PI * 2; a += Math.PI / 14) {
-      if (Math.abs(Math.sin(a)) < 0.2 || Math.abs(Math.cos(a)) < 0.2) continue;
-      const x = cx + Math.cos(a) * 15, z = cz + Math.sin(a) * 15;
-      this.box(x, 0, z, 1.7, 1.1, 1.7, m.sandbag, true, 0);
-    }
-    // tents
-    this.box(cx - 19, 0, cz - 17, 6, 2.6, 4, m.olive, true, 2);
-    this.box(cx - 19, 2.6, cz - 17, 6.4, 0.6, 3, m.olive, false, 2);
-    this.box(cx + 17, 0, cz - 19, 4, 2.6, 6, m.olive, true, 2);
-    for (const [x, z] of [[cx - 15, cz - 14], [cx + 14, cz - 15], [cx - 16, cz + 15]]) {
-      this.box(x, 0, z, 1.2, 0.7, 0.7, m.olive, true, 1);
-      this.addContainer(x, 0.7, z, 'military');
-    }
-    // parked military truck
-    this.box(cx + 16, 0.5, cz + 14, 2.4, 1.4, 6, m.olive, true, 2);
-    this.box(cx + 16, 1.9, cz + 12, 2.4, 1.2, 1.8, m.olive, true, 2);
-    this.addContainer(cx + 16, 1.9, cz + 17, 'trunk');
-  }
-
-  buildPark(x0, x1, z0, z1) {
-    const r = this.rng;
-    for (let i = 0; i < 22; i++) {
-      const x = lerp(x0 + 2, x1 - 2, r()), z = lerp(z0 + 2, z1 - 2, r());
-      this.tree(x, z);
-    }
-    // benches & a kiosk
-    for (let i = 0; i < 5; i++) {
-      const x = lerp(x0 + 6, x1 - 6, r()), z = lerp(z0 + 6, z1 - 6, r());
-      this.box(x, 0.4, z, 1.8, 0.1, 0.5, this.mats.wood, false, 1);
-      this.box(x, 0, z, 1.6, 0.4, 0.4, this.mats.metal, true, 0);
-    }
-    const kx = (x0 + x1) / 2, kz = (z0 + z1) / 2;
-    this.buildHouse(kx, kz, 5, 4, this.doorSideFor(kx, kz), { wall: this.mats.plasterC, furniture: ['fridge'], noTable: true });
-  }
-
-  buildCheckpoint(cx, cz) {
-    const m = this.mats;
-    // jersey barriers on the approaches
-    for (const [dx, dz, along] of [[0, -12, 'x'], [0, 12, 'x'], [-12, 0, 'z'], [12, 0, 'z']]) {
-      for (const o of [-3.2, 3.2]) {
-        const x = cx + dx + (along === 'x' ? o : 0), z = cz + dz + (along === 'z' ? o : 0);
-        if (along === 'x') this.box(x, 0, z, 2.8, 0.9, 0.6, m.concrete, true, 1);
-        else this.box(x, 0, z, 0.6, 0.9, 2.8, m.concrete, true, 1);
-      }
-    }
-    // sandbag nest and military crates
-    this.box(cx + 7, 0, cz + 7, 3.4, 1.1, 0.9, m.sandbag, true, 0);
-    this.box(cx + 8.3, 0, cz + 5.6, 0.9, 1.1, 2.2, m.sandbag, true, 0);
-    this.box(cx - 7.5, 0, cz - 7.5, 1.2, 0.7, 0.7, m.olive, true, 1);
-    this.addContainer(cx - 7.5, 0.7, cz - 7.5, 'military');
-    this.box(cx + 7.5, 0, cz - 7.8, 1.2, 0.7, 0.7, m.olive, true, 1);
-    this.addContainer(cx + 7.5, 0.7, cz - 7.8, 'military');
-    // abandoned APC-ish box
-    this.box(cx - 6, 0.4, cz + 7.5, 5.5, 1.6, 2.6, m.olive, true, 2);
-    this.box(cx - 6.5, 2, cz + 7.5, 2, 0.7, 1.8, m.olive, true, 1);
-    this.box(cx - 4.8, 2.3, cz + 7.5, 2.4, 0.18, 0.18, m.metal, false, 0);
-    // blood stains
-    for (let i = 0; i < 6; i++) {
-      this.box(cx + (this.rng() - 0.5) * 16, 0.1, cz + (this.rng() - 0.5) * 16, 1 + this.rng(), 0.012, 1 + this.rng(), m.blood, false, 0);
-    }
-  }
-
-  car(x, z, alongX) {
-    const m = this.mats;
-    const r = this.rng;
-    const mat = pick([m.carRed, m.carBlue, m.carWhite, m.carGreen, m.rust], r);
-    const L = 4.2, W = 1.9;
-    const w = alongX ? L : W, d = alongX ? W : L;
-    this.box(x, 0.35, z, w, 0.9, d, mat, true, 0);
-    const cw = alongX ? 2.2 : 1.7, cd = alongX ? 1.7 : 2.2;
-    const cabOff = -0.2;
-    const cx = x + (alongX ? cabOff : 0), cz = z + (alongX ? 0 : cabOff);
-    this.box(cx, 1.25, cz, cw, 0.7, cd, m.glass, true, 0);
-    this.box(cx, 1.95, cz, cw * 0.95, 0.06, cd * 0.95, mat, false, 0);
-    for (const [a, b] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-      const wx = x + (alongX ? a * 1.35 : b * 0.85), wz = z + (alongX ? b * 0.85 : a * 1.35);
-      const g = new THREE.CylinderGeometry(0.36, 0.36, 0.25, 12).rotateZ(Math.PI / 2);
-      if (alongX) g.rotateY(Math.PI / 2);
-      this.addGeo(g.translate(wx, 0.36, wz), m.tire);
-    }
-    if (r() < 0.65) {
-      const back = r() < 0.5 ? -1 : 1;
-      const tx = x + (alongX ? back * (L / 2 + 0.2) : 0), tz = z + (alongX ? 0 : back * (L / 2 + 0.2));
-      this.addContainer(tx, 1.0, tz, 'trunk');
-    }
-  }
-
-  scatterCars() {
-    const r = this.rng;
-    let n = 0;
-    for (let tries = 0; tries < 200 && n < 26; tries++) {
-      const road = pick(ROADS, r);
-      const alongX = r() < 0.5;
-      const s = lerp(-HALF + 8, HALF - 8, r());
-      const lane = (r() < 0.5 ? -1 : 1) * (1.8 + r() * 1.2);
-      const x = alongX ? s : road + lane;
-      const z = alongX ? road + lane : s;
-      if (Math.hypot(x, z) < 16) continue; // keep checkpoint clear
-      if (Math.hypot(x - 2, z - 22) < 8) continue; // keep spawn clear
-      // not in intersections
-      if (ROADS.some((p) => Math.abs((alongX ? x : z) - p) < ROAD_W / 2 + 3)) continue;
-      if (!this.isFree(x, z, 3)) continue;
-      this.car(x, z, alongX);
-      n++;
-    }
-  }
-
-  scatterLamps() {
-    const m = this.mats;
-    for (const p of ROADS) {
-      for (let s = -HALF + 10; s < HALF; s += 22) {
-        if (ROADS.some((q) => Math.abs(s - q) < 8)) continue;
-        for (const [x, z] of [[p + 6.2, s], [s, p - 6.2]]) {
-          if (!this.isFree(x, z, 0.6)) continue;
-          this.box(x, 0, z, 0.16, 5.5, 0.16, m.metal, true, 0);
-          this.box(x, 5.4, z, 0.5, 0.15, 0.3, m.metal, false, 0);
-        }
-      }
-    }
-  }
-
-  tree(x, z) {
-    const m = this.mats;
-    const r = this.rng;
-    const h = 2.2 + r() * 1.6;
-    this.addGeo(new THREE.CylinderGeometry(0.16, 0.26, h, 7).translate(x, h / 2, z), m.bark);
-    this.addCollider(x - 0.25, 0, z - 0.25, x + 0.25, h, z + 0.25);
-    const leaf = r() < 0.5 ? m.leaves : m.leaves2;
-    if (r() < 0.5) {
-      this.addGeo(new THREE.ConeGeometry(1.8, 3.2, 7).translate(x, h + 1.2, z), leaf);
-      this.addGeo(new THREE.ConeGeometry(1.3, 2.4, 7).translate(x, h + 2.6, z), leaf);
-    } else {
-      const s = 1.4 + r() * 0.8;
-      this.addGeo(new THREE.IcosahedronGeometry(s, 0).translate(x, h + s * 0.6, z), leaf);
-    }
-  }
-
-  scatterTrees(n) {
-    const r = this.rng;
-    let placed = 0;
-    for (let t = 0; t < n * 6 && placed < n; t++) {
-      const x = lerp(-HALF + 3, HALF - 3, r()), z = lerp(-HALF + 3, HALF - 3, r());
-      if (this.onRoad(x, z, 2.5)) continue;
-      if (!this.isFree(x, z, 2)) continue;
-      if (this.helipad && Math.hypot(x - this.helipad.x, z - this.helipad.z) < 22) continue;
-      this.tree(x, z);
-      placed++;
-    }
-  }
-
-  // Hide the three radio parts in house containers far from the start and from each other.
-  placeRadioParts() {
-    const r = this.rng;
-    const candidates = this.containers.filter((c) => c.building != null && Math.hypot(c.x - 2, c.z - 22) > 40);
-    const chosen = [];
-    for (let t = 0; t < 400 && chosen.length < 3; t++) {
-      const c = pick(candidates, r);
-      if (chosen.includes(c)) continue;
-      if (chosen.some((o) => Math.hypot(o.x - c.x, o.z - c.z) < 60)) continue;
-      chosen.push(c);
-    }
-    // Fallback if the spread constraint could not be met.
-    for (const c of candidates) if (chosen.length < 3 && !chosen.includes(c)) chosen.push(c);
-    for (const c of chosen) c.items.push({ id: 'radio_part', qty: 1 });
-    this.radioContainers = chosen;
   }
 
   finalize() {
-    for (const [mat, geos] of this.statics) {
+    const noShadow = new Set([this.mats.asphalt, this.mats.dirtRoad, this.mats.line, this.mats.blood, this.mats.soil]);
+    for (const { mat, geos } of this.statics.values()) {
       const mesh = new THREE.Mesh(mergeGeos(geos), mat);
-      mesh.castShadow = mat !== this.mats.asphalt && mat !== this.mats.sidewalk && mat !== this.mats.line && mat !== this.mats.blood;
+      mesh.castShadow = !noShadow.has(mat);
       mesh.receiveShadow = true;
       mesh.matrixAutoUpdate = false;
       this.scene.add(mesh);
     }
     this.statics.clear();
+  }
+
+  // Top-down map for the minimap (canvas 2D, x right, z down).
+  renderMap(size) {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const g = c.getContext('2d');
+    const k = size / (HALF * 2);
+    const X = (x) => (x + HALF) * k;
+    const img = g.createImageData(size, size);
+    const col = new THREE.Color();
+    const cell = HALF * 2 / size;
+    for (let py = 0; py < size; py++) {
+      for (let px = 0; px < size; px++) {
+        const x = -HALF + (px + 0.5) * cell, z = -HALF + (py + 0.5) * cell;
+        const h = this.terrain.height(x, z);
+        if (h < WATER_Y) col.setRGB(0.2, 0.32, 0.38);
+        else {
+          this.terrainColor(x, z, h, col);
+          const shade = 0.75 + clamp((h - 3) / 30, -0.2, 0.35); // higher ground lighter
+          col.multiplyScalar(shade);
+        }
+        const o = (py * size + px) * 4;
+        img.data[o] = col.r * 255; img.data[o + 1] = col.g * 255; img.data[o + 2] = col.b * 255; img.data[o + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    for (const r of this.roads) {
+      g.strokeStyle = r.kind === 'asphalt' ? '#55575b' : '#8a7458';
+      g.lineWidth = Math.max(2, r.w * k);
+      g.beginPath();
+      r.pts.forEach(([x, z], i) => (i ? g.lineTo(X(x), X(z)) : g.moveTo(X(x), X(z))));
+      g.stroke();
+    }
+    for (const b of this.buildings) {
+      g.fillStyle = b.enterable ? '#c9bea4' : '#8d887e';
+      g.fillRect(X(b.minX), X(b.minZ), Math.max(2, (b.maxX - b.minX) * k), Math.max(2, (b.maxZ - b.minZ) * k));
+    }
+    if (this.helipad) {
+      g.strokeStyle = '#d9b23a';
+      g.lineWidth = 3;
+      g.beginPath();
+      g.arc(X(this.helipad.x), X(this.helipad.z), 8 * k, 0, Math.PI * 2);
+      g.stroke();
+    }
+    return { canvas: c, k };
   }
 
   // ---------- sky & lighting ----------
@@ -882,26 +666,26 @@ export class World {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera;
-    sc.left = -45; sc.right = 45; sc.top = 45; sc.bottom = -45; sc.near = 1; sc.far = 220;
+    sc.left = -55; sc.right = 55; sc.top = 55; sc.bottom = -55; sc.near = 1; sc.far = 260;
     this.sun.shadow.bias = -0.0005;
-    this.sun.shadow.normalBias = 0.04;
+    this.sun.shadow.normalBias = 0.05;
     s.add(this.sun);
     s.add(this.sun.target);
-    s.fog = new THREE.Fog(0x9fb0b8, 20, 170);
+    s.fog = new THREE.Fog(0x9fb0b8, 30, 260);
     s.background = new THREE.Color(0x9fb0b8);
 
     const starGeo = new THREE.BufferGeometry();
     const pts = [];
-    for (let i = 0; i < 900; i++) {
+    for (let i = 0; i < 1200; i++) {
       const u = Math.random() * Math.PI * 2, v = Math.random() * 0.9 + 0.08;
       const y = v, rr = Math.sqrt(1 - y * y);
-      pts.push(Math.cos(u) * rr * 380, y * 380, Math.sin(u) * rr * 380);
+      pts.push(Math.cos(u) * rr * 480, y * 480, Math.sin(u) * rr * 480);
     }
     starGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, fog: false, transparent: true, opacity: 0 }));
     s.add(this.stars);
 
-    this.cDay = new THREE.Color(0x9fb0b8);
+    this.cDay = new THREE.Color(0xa7b8bf);
     this.cDusk = new THREE.Color(0xc98a5a);
     this.cNight = new THREE.Color(0x070a10);
     this.tmpC = new THREE.Color();
@@ -917,14 +701,15 @@ export class World {
     const c = this.tmpC.copy(this.cNight).lerp(this.cDay, dayF).lerp(this.cDusk, dusk * 0.55);
     this.scene.background.copy(c);
     this.scene.fog.color.copy(c);
-    this.scene.fog.near = lerp(4, 25, dayF);
-    this.scene.fog.far = lerp(55, 175, dayF);
+    this.scene.fog.near = lerp(5, 40, dayF);
+    this.scene.fog.far = lerp(70, 280, dayF);
 
     // Sun by day, a weak blue moon by night.
     const lightUp = elev > 0 ? 1 : -1;
     const dirX = Math.cos(ang) * lightUp, dirY = Math.abs(elev) * 0.9 + 0.25, dirZ = 0.45;
-    this.sun.position.set(center.x + dirX * 80, dirY * 80, center.z + dirZ * 80);
-    this.sun.target.position.set(center.x, 0, center.z);
+    const cy = center.y ?? this.terrain.height(center.x, center.z);
+    this.sun.position.set(center.x + dirX * 100, cy + dirY * 100, center.z + dirZ * 100);
+    this.sun.target.position.set(center.x, cy, center.z);
     if (elev > 0) {
       this.sun.color.setRGB(1, lerp(0.62, 0.96, clamp(elev * 3, 0, 1)), lerp(0.4, 0.9, clamp(elev * 3, 0, 1)));
       this.sun.intensity = 2.7 * dayF;

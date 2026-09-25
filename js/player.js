@@ -22,9 +22,10 @@ export class Player {
   }
 
   reset() {
-    this.pos = new THREE.Vector3(2, 0, 22);
+    const sp = this.world.spawn || { x: 0, z: 0, yaw: 0 };
+    this.pos = new THREE.Vector3(sp.x, this.world.ground ? this.world.ground(sp.x, sp.z) : 0, sp.z);
     this.vel = new THREE.Vector3();
-    this.yaw = 0;
+    this.yaw = sp.yaw;
     this.pitch = 0;
     this.height = STAND_H;
     this.crouching = false;

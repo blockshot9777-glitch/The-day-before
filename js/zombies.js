@@ -93,7 +93,9 @@ export class Zombies {
       visual = new ZombieVisual(pick(pool), type, t.scale);
     }
     const mesh = visual ? visual.group : this.makeMesh(type);
-    mesh.position.set(x, 0, z);
+    // stand on the ground (or a floor) right away, not at y = 0 under the hills
+    const w = this.game.world;
+    mesh.position.set(x, w.groundAt({ x, z }, R, w.ground(x, z), 0.45), z);
     this.group.add(mesh);
     const zb = {
       type, t, mesh, pos: mesh.position, hp: t.hp * diff.zHp, maxHp: t.hp * diff.zHp,

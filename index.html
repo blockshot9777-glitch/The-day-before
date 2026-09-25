@@ -141,6 +141,7 @@
         <dt>F</dt><dd>Фонарик (садится батарейка)</dd>
         <dt>H</dt><dd>Быстрое лечение</dd>
         <dt>Tab / I</dt><dd>Инвентарь</dd>
+        <dt>M</dt><dd>Карта зоны</dd>
         <dt>Esc</dt><dd>Пауза</dd>
       </dl>
       <p class="note">Стрельба шумит и приманивает зомби. Ночью их больше и появляются бегуны. Укусы вызывают кровотечение — нужен бинт или аптечка.</p>
@@ -161,6 +162,14 @@
         <div id="inv-desc">ЛКМ — использовать, ПКМ — выбросить.</div>
       </div>
       <div class="inv-foot"><span>Tab — закрыть</span><span id="inv-ammo"></span></div>
+    </div>
+  </div>
+
+  <!-- MAP -->
+  <div id="bigmap" class="screen dim" hidden>
+    <div class="map-box">
+      <header class="inv-head"><h2>Карта зоны</h2><span>M — закрыть</span></header>
+      <canvas id="bigmap-canvas" width="600" height="600"></canvas>
     </div>
   </div>
 

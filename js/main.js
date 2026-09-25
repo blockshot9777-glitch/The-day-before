@@ -8,6 +8,7 @@ import { Effects } from './effects.js';
 import { Input } from './input.js';
 import { Audio } from './audio.js';
 import { loadZombieModels } from './models.js';
+import { loadNatureModels } from './nature.js';
 import { UI } from './ui.js';
 import { Inventory, ITEMS } from './items.js';
 import { storage, fmtTime, clamp } from './util.js';
@@ -79,7 +80,8 @@ class Game {
     this.scene.add(this.camera);
     // ?seed=123 fixes the town layout (used by the automated test).
     const seed = Number(new URLSearchParams(location.search).get('seed')) || ((Math.random() * 1e9) | 0);
-    this.world = new World(this.scene, { seed, lootMul: this.diff.loot });
+    this.world = new World(this.scene, { seed, lootMul: this.diff.loot, assets: this.assets });
+    this.ui.mapCache = null;
     this.effects = new Effects(this);
     this.zombies = new Zombies(this);
     this.player = new Player(this);
@@ -104,9 +106,9 @@ class Game {
     this.applyShadows();
     this.world.updateSky(this.timeOfDay, this.player.pos, 0);
     // a few zombies already roam the town
-    for (let i = 0; i < 70 && this.zombies.list.length < Math.round(this.diff.zCount * 0.8); i++) {
-      const x = (Math.random() - 0.5) * 200, z = (Math.random() - 0.5) * 200;
-      if (Math.hypot(x - this.player.pos.x, z - this.player.pos.z) < 30) continue;
+    for (let i = 0; i < 120 && this.zombies.list.length < Math.round(this.diff.zCount * 0.8); i++) {
+      const a = Math.random() * Math.PI * 2, d = 35 + Math.random() * 55;
+      const x = this.player.pos.x + Math.cos(a) * d, z = this.player.pos.z + Math.sin(a) * d;
       if (!this.world.isFree(x, z, 0.8)) continue;
       this.zombies.spawn(Math.random() < 0.15 ? 'runner' : 'walker', x, z);
     }
@@ -139,8 +141,8 @@ class Game {
 
   // ---------- screens & menus ----------
   showScreen(id) {
-    for (const s of ['menu', 'pause', 'settings', 'controls', 'inventory', 'end']) $(s).hidden = s !== id;
-    $('hud').hidden = !(id === null || id === 'inventory' || id === 'pause');
+    for (const s of ['menu', 'pause', 'settings', 'controls', 'inventory', 'end', 'bigmap']) $(s).hidden = s !== id;
+    $('hud').hidden = !(id === null || id === 'inventory' || id === 'pause' || id === 'bigmap');
   }
 
   bindMenus() {
@@ -252,12 +254,26 @@ class Game {
     }
   }
 
+  openMap() {
+    this.state = 'map';
+    this.input.enabled = false;
+    this.expectUnlock = true;
+    this.input.exitLock();
+    this.showScreen('bigmap');
+    this.ui.renderBigMap();
+  }
+
   onKey(e) {
     if (e.code === 'Escape') {
       if (this.state === 'playing') { this.pause(); return true; }
       if (this.state === 'paused') { this.resume(); return true; }
       if (this.state === 'inventory') { this.resume(); return true; }
     }
+    if (e.code === 'KeyM') {
+      if (this.state === 'playing') { this.openMap(); return true; }
+      if (this.state === 'map') { this.resume(); return true; }
+    }
+    if (e.code === 'Escape' && this.state === 'map') { this.resume(); return true; }
     if (e.code === 'Tab' || e.code === 'KeyI') {
       if (this.state === 'playing' || this.state === 'inventory') { this.toggleInventory(); return true; }
     }
@@ -474,7 +490,7 @@ class Game {
     const rc = this.world.radioConsole;
     if (rc && (this.phase === 'radio' || this.phase === 'parts')) consider(rc, rc.x, rc.y, rc.z, 'radio', 2.6);
     const h = this.effects.heli;
-    if (h && h.landed) consider(h, h.group.position.x, 1.5, h.group.position.z, 'heli', 7);
+    if (h && h.landed) consider(h, h.group.position.x, h.group.position.y + 1.5, h.group.position.z, 'heli', 7);
     if (best && best.kind !== 'heli') {
       // The loot point sits inside its furniture, so allow the ray to stop within the last 0.9 m.
       const o = best.obj;
@@ -633,6 +649,9 @@ class Game {
     this.effects.update(dt);
     const sky = this.world.updateSky(this.timeOfDay, p.pos, dt);
     this.dayF = sky.dayF;
+    // nothing past the fog is visible: don't draw it
+    const far = this.scene.fog.far + 30;
+    if (Math.abs(this.camera.far - far) > 5) { this.camera.far = far; this.camera.updateProjectionMatrix(); }
     this.weapons.syncLight(this.world);
     this.updateInteract(dt);
 
@@ -674,7 +693,7 @@ class Game {
     const r = this.renderer;
     r.clear();
     r.render(this.scene, this.camera);
-    if (this.state === 'playing' || this.state === 'paused' || this.state === 'inventory') {
+    if (this.state === 'playing' || this.state === 'paused' || this.state === 'inventory' || this.state === 'map') {
       r.clearDepth();
       r.render(this.weapons.scene, this.weapons.camera);
     }
@@ -701,9 +720,11 @@ class Game {
       // slow orbit behind the main menu
       this.menuT = (this.menuT || 0) + dt;
       const a = this.menuT * 0.05;
-      this.camera.position.set(Math.sin(a) * 40, 14, Math.cos(a) * 40);
-      this.camera.lookAt(0, 2, 0);
-      this.world.updateSky(0.29, { x: 0, z: 0 }, dt);
+      // slow orbit over the village
+      const gy = this.world.ground(20, 20);
+      this.camera.position.set(20 + Math.sin(a) * 70, gy + 26, 20 + Math.cos(a) * 70);
+      this.camera.lookAt(20, gy + 2, 20);
+      this.world.updateSky(0.29, { x: 20, z: 20 }, dt);
     }
     this.render();
     if (!this.manual) this.input.endFrame();
@@ -713,12 +734,11 @@ class Game {
 
 try {
   // models load before the first town is built; the game still runs without them
-  let assets = {};
-  try {
-    assets.zombies = await loadZombieModels();
-  } catch (err) {
-    console.warn('zombie models unavailable, using simple ones', err);
-  }
+  const assets = {};
+  await Promise.all([
+    loadZombieModels().then((m) => { assets.zombies = m; }).catch((err) => console.warn('zombie models unavailable, using simple ones', err)),
+    loadNatureModels().then((m) => { assets.nature = m; }).catch((err) => console.warn('nature models unavailable, using simple ones', err)),
+  ]);
   window.__game = new Game(assets);
 } catch (err) {
   console.error(err);
