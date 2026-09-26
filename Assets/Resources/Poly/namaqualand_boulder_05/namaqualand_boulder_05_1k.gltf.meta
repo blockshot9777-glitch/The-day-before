@@ -1,0 +1,40 @@
+fileFormatVersion: 2
+guid: 13b9ef4b6c1d41244a7ee1c920c35446
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {fileID: 11500000, guid: 715df9372183c47e389bb6e19fbc3b52, type: 3}
+  editorImportSettings:
+    generateSecondaryUVSet: 0
+  importSettings:
+    nodeNameMethod: 1
+    animationMethod: 2
+    generateMipMaps: 1
+    texturesReadable: 0
+    defaultMinFilterMode: 9729
+    defaultMagFilterMode: 9729
+    anisotropicFilterLevel: 1
+  instantiationSettings:
+    mask: -1
+    layer: 0
+    skinUpdateWhenOffscreen: 1
+    lightIntensityFactor: 1
+    sceneObjectCreation: 2
+  assetDependencies:
+  - type: 0
+    originalUri: Assets\Resources\Poly\namaqualand_boulder_05\namaqualand_boulder_05.bin
+    assetPath: Assets\Resources\Poly\namaqualand_boulder_05\namaqualand_boulder_05.bin
+  - type: 0
+    originalUri: Assets\Resources\Poly\namaqualand_boulder_05\textures\namaqualand_boulder_05_nor_gl_1k.jpg
+    assetPath: Assets\Resources\Poly\namaqualand_boulder_05\textures\namaqualand_boulder_05_nor_gl_1k.jpg
+  - type: 0
+    originalUri: Assets\Resources\Poly\namaqualand_boulder_05\textures\namaqualand_boulder_05_diff_1k.jpg
+    assetPath: Assets\Resources\Poly\namaqualand_boulder_05\textures\namaqualand_boulder_05_diff_1k.jpg
+  - type: 0
+    originalUri: Assets\Resources\Poly\namaqualand_boulder_05\textures\namaqualand_boulder_05_arm_1k.jpg
+    assetPath: Assets\Resources\Poly\namaqualand_boulder_05\textures\namaqualand_boulder_05_arm_1k.jpg
+  reportItems: []

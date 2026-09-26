@@ -1,0 +1,49 @@
+fileFormatVersion: 2
+guid: eebc99097be782f4fbd46abaf35f39cb
+ScriptedImporter:
+  internalIDToNameTable: []
+  externalObjects: {}
+  serializedVersion: 2
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+  script: {fileID: 11500000, guid: 715df9372183c47e389bb6e19fbc3b52, type: 3}
+  editorImportSettings:
+    generateSecondaryUVSet: 0
+  importSettings:
+    nodeNameMethod: 1
+    animationMethod: 2
+    generateMipMaps: 1
+    texturesReadable: 0
+    defaultMinFilterMode: 9729
+    defaultMagFilterMode: 9729
+    anisotropicFilterLevel: 1
+  instantiationSettings:
+    mask: -1
+    layer: 0
+    skinUpdateWhenOffscreen: 1
+    lightIntensityFactor: 1
+    sceneObjectCreation: 2
+  assetDependencies:
+  - type: 0
+    originalUri: Assets\Resources\Poly\metal_trash_can\metal_trash_can.bin
+    assetPath: Assets\Resources\Poly\metal_trash_can\metal_trash_can.bin
+  - type: 1
+    originalUri: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_nor_gl_1k.jpg
+    assetPath: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_nor_gl_1k.jpg
+  - type: 1
+    originalUri: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_diff_1k.jpg
+    assetPath: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_diff_1k.jpg
+  - type: 1
+    originalUri: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_arm_1k.jpg
+    assetPath: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_arm_1k.jpg
+  - type: 1
+    originalUri: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_rust_nor_gl_1k.jpg
+    assetPath: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_rust_nor_gl_1k.jpg
+  - type: 1
+    originalUri: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_rust_diff_1k.jpg
+    assetPath: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_rust_diff_1k.jpg
+  - type: 1
+    originalUri: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_rust_arm_1k.jpg
+    assetPath: Assets\Resources\Poly\metal_trash_can\textures\metal_trash_can_rust_arm_1k.jpg
+  reportItems: []
