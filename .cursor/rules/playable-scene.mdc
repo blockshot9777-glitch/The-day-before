@@ -1,0 +1,19 @@
+---
+description: Scene fixes are done only after Edit Mode tests, and after a Play frame when the tests cannot see the picture
+alwaysApply: true
+---
+
+# Scene checks
+
+- Run `TheDayBefore.EditModeTests` before saying a weapon, house, collider, texture, or prop change works. The tests live in `Assets/Tests/EditMode/SceneRulesTests.cs`.
+- A knife trace starts inside the player capsule. Use `PlayerWeapons.TryPick`. Do not raycast from the eyes and take the first hit.
+- One solid floor: `GreyboxWorld.BuildWalkSurface`. Road, dashes, glass, and lamps are not colliders.
+- House walls overlap at the corners. Floor and ceiling close the room. Every window has a pane.
+- Box texture scale is the face size / 1.4 m. Ground and road scales are world size / tile.
+- Do not `FitHeight` a flat mesh (rug, fern card) up to metres.
+- Lamp bounds must not intersect benches or tables. Lamps spawn with `collider: false`.
+- Do not leave a script that teleports the player or enters Play by itself.
+- Official Asset Store free packs and CC0 only. No getasset.net, no unityhub.pro.
+- A second Unity while `Temp/UnityLockfile` exists will exit. Do not start one.
+
+The longer list of failures is in the personal skill `playable-scene`.

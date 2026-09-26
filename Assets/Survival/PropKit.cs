@@ -17,6 +17,7 @@ public static class PropKit
         go.name = prefab.name;
         if (targetHeight > 0f) FitHeight(go, targetHeight, pos.y);
         if (collider) AddBoundsCollider(go);
+        else StripColliders(go);
         Calm(go);
         TryLoop(go, resourcePath);
         return go;
@@ -50,15 +51,24 @@ public static class PropKit
     }
 
     // glTF metals were mirroring the sky, so props read as flat cyan.
+    // Copy materials explicitly. renderer.materials logs an error in edit mode and the tests treat that as a failure.
     static void Calm(GameObject go)
     {
         foreach (var r in go.GetComponentsInChildren<Renderer>())
-        foreach (var m in r.materials)
         {
-            if (m.HasProperty("metallicFactor")) m.SetFloat("metallicFactor", 0f);
-            if (m.HasProperty("roughnessFactor")) m.SetFloat("roughnessFactor", 0.72f);
-            if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", 0f);
-            if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", 0.28f);
+            var src = r.sharedMaterials;
+            var copy = new Material[src.Length];
+            for (int i = 0; i < src.Length; i++)
+            {
+                if (src[i] == null) continue;
+                var m = new Material(src[i]);
+                if (m.HasProperty("metallicFactor")) m.SetFloat("metallicFactor", 0f);
+                if (m.HasProperty("roughnessFactor")) m.SetFloat("roughnessFactor", 0.72f);
+                if (m.HasProperty("_Metallic")) m.SetFloat("_Metallic", 0f);
+                if (m.HasProperty("_Smoothness")) m.SetFloat("_Smoothness", 0.28f);
+                copy[i] = m;
+            }
+            r.sharedMaterials = copy;
         }
     }
 
@@ -68,6 +78,10 @@ public static class PropKit
         if (rs.Length == 0 || targetHeight <= 0f) return;
         var b = rs[0].bounds;
         for (int i = 1; i < rs.Length; i++) b.Encapsulate(rs[i].bounds);
+        // A rug or a card has almost no height. Scaling it to metres turns it into a wall.
+        bool flat = b.size.y < Mathf.Min(b.size.x, b.size.z) * 0.08f;
+        float raw = b.size.y > 0.0001f ? targetHeight / b.size.y : 999f;
+        if (flat && (raw > 8f || raw < 0.125f)) return;
         float h = Mathf.Max(0.01f, b.size.y);
         go.transform.localScale *= targetHeight / h;
         b = rs[0].bounds;
@@ -75,10 +89,22 @@ public static class PropKit
         go.transform.position += Vector3.up * (groundY - b.min.y);
     }
 
+    public static void Release(Object obj)
+    {
+        if (obj == null) return;
+        if (Application.isPlaying) Object.Destroy(obj);
+        else Object.DestroyImmediate(obj);
+    }
+
+    static void StripColliders(GameObject go)
+    {
+        foreach (var c in go.GetComponentsInChildren<Collider>()) Release(c);
+    }
+
     // Build the box in the object's local space so rotated props keep a centered hit volume.
     public static void AddBoundsCollider(GameObject go)
     {
-        foreach (var c in go.GetComponentsInChildren<Collider>()) Object.Destroy(c);
+        foreach (var c in go.GetComponentsInChildren<Collider>()) Release(c);
         Bounds local = default;
         bool any = false;
         var filters = go.GetComponentsInChildren<MeshFilter>();

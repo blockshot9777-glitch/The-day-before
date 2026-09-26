@@ -26,7 +26,10 @@ public class GameBootstrap : MonoBehaviour
         cc.height = 1.8f;
         cc.radius = 0.35f;
         cc.center = new Vector3(0f, 0.9f, 0f);
-        cc.stepOffset = 0.4f;
+        cc.stepOffset = 0.35f;
+        cc.skinWidth = 0.06f;
+        cc.slopeLimit = 52f;
+        cc.minMoveDistance = 0f;
 
         var camGo = new GameObject("Camera");
         camGo.transform.SetParent(player.transform, false);

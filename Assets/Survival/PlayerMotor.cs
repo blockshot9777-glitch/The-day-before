@@ -69,10 +69,13 @@ public class PlayerMotor : MonoBehaviour
             return;
         }
 
-        crouching = kb.leftCtrlKey.isPressed || kb.cKey.isPressed;
-        body.height = crouching ? 1.15f : 1.8f;
-        body.center = new Vector3(0f, body.height * 0.5f, 0f);
-        if (view != null) view.localPosition = new Vector3(0f, body.height - 0.12f, 0f);
+        bool nextCrouch = kb.leftCtrlKey.isPressed || kb.cKey.isPressed;
+        if (nextCrouch != crouching)
+        {
+            crouching = nextCrouch;
+            body.height = crouching ? 1.2f : 1.8f;
+            body.center = new Vector3(0f, body.height * 0.5f, 0f);
+        }
 
         bool wantSprint = kb.leftShiftKey.isPressed && !crouching && vitals != null && vitals.stamina > 1f;
         float speed = crouching ? crouchSpeed : wantSprint ? sprintSpeed : walkSpeed;
@@ -100,15 +103,16 @@ public class PlayerMotor : MonoBehaviour
         move.y = yVel;
         body.Move(move * Time.deltaTime);
 
-        if (wish.sqrMagnitude > 0.1f && body.isGrounded)
+        if (view != null)
         {
-            bob += Time.deltaTime * speed * 1.4f;
-            if (view != null)
+            float eye = body.height - 0.12f;
+            float bobY = 0f;
+            if (wish.sqrMagnitude > 0.1f && body.isGrounded)
             {
-                var p = view.localPosition;
-                p.y += Mathf.Sin(bob) * 0.025f;
-                view.localPosition = p;
+                bob += Time.deltaTime * speed * 1.4f;
+                bobY = Mathf.Sin(bob) * 0.018f;
             }
+            view.localPosition = new Vector3(0f, eye + bobY, 0f);
         }
     }
 }

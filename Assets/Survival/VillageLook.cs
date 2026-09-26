@@ -162,9 +162,12 @@ public static class VillageLook
             ?? GreyboxWorld.Mat(new Color(0.38f, 0.3f, 0.2f), 0.08f);
         var glass = Glass();
 
-        Box(root, "Yard", new Vector3(0f, 0.02f, 0f), new Vector3(w + 2.6f, 0.04f, d + 2.8f), dirt);
-        Box(root, "Foundation", new Vector3(0f, baseH * 0.5f, 0f), new Vector3(w + 0.16f, baseH, d + 0.16f), brickMat);
-        Box(root, "Floor", new Vector3(0f, baseH - 0.04f, 0f), new Vector3(w - 0.5f, 0.08f, d - 0.5f), wood);
+        Box(root, "Yard", new Vector3(0f, 0.015f, 0f), new Vector3(w + 2.2f, 0.02f, d + 2.4f), dirt);
+        Box(root, "Foundation", new Vector3(0f, baseH * 0.5f, 0f), new Vector3(w + 0.08f, baseH, d + 0.08f), brickMat);
+        Box(root, "Floor", new Vector3(0f, baseH - 0.02f, 0f), new Vector3(w - 0.04f, 0.06f, d - 0.04f), wood);
+        var ceilingMat = GreyboxWorld.Photo("wood_floor", new Vector2(1.2f, 2f), new Color(0.72f, 0.58f, 0.4f))
+            ?? GreyboxWorld.Mat(new Color(0.45f, 0.32f, 0.2f), 0.12f);
+        Box(root, "Ceiling", new Vector3(0f, top - 0.04f, 0f), new Vector3(w + 0.04f, 0.08f, d + 0.04f), ceilingMat);
 
         float winW = 1.15f;
         float winY0 = baseH + 0.82f;
@@ -177,7 +180,7 @@ public static class VillageLook
             new Hole(hx - 1.15f - winW, hx - 1.15f, winY0, winY1),
         };
         WallX(root, -hz, thick, -hx, hx, baseH, top, plaster, front);
-        WallX(root, hz, thick, -hx + thick, hx - thick, baseH, top, plaster, new[]
+        WallX(root, hz, thick, -hx, hx, baseH, top, plaster, new[]
         {
             new Hole(-0.7f, 0.55f, winY0, winY1),
         });
@@ -186,8 +189,8 @@ public static class VillageLook
             new Hole(-hz * 0.55f, -hz * 0.55f + winW, winY0, winY1),
             new Hole(hz * 0.15f, hz * 0.15f + winW, winY0, winY1),
         };
-        WallZ(root, -hx, thick, -hz + thick, hz - thick, baseH, top, plaster, side);
-        WallZ(root, hx, thick, -hz + thick, hz - thick, baseH, top, plaster, side);
+        WallZ(root, -hx, thick, -hz, hz, baseH, top, plaster, side);
+        WallZ(root, hx, thick, -hz, hz, baseH, top, plaster, side);
         foreach (var h in side)
         {
             WindowSide(root, -hx, (h.a + h.b) * 0.5f, (h.y0 + h.y1) * 0.5f, (h.b - h.a) * 0.5f, (h.y1 - h.y0) * 0.5f, woodDark, glass, rng);
@@ -208,9 +211,9 @@ public static class VillageLook
 
         var hinge = new GameObject("DoorHinge");
         hinge.transform.SetParent(root, false);
-        hinge.transform.localPosition = new Vector3(-doorW * 0.5f, 0f, -hz - thick * 0.5f - 0.03f);
-        float doorH = 2.02f;
-        Box(hinge.transform, "Door", new Vector3(doorW * 0.5f, baseH + doorH * 0.5f, 0f), new Vector3(doorW - 0.04f, doorH, 0.07f), woodDark);
+        hinge.transform.localPosition = new Vector3(-doorW * 0.5f, 0f, -hz);
+        float doorH = 2.16f;
+        Box(hinge.transform, "Door", new Vector3(doorW * 0.5f, baseH + doorH * 0.5f, 0f), new Vector3(doorW - 0.02f, doorH, 0.18f), woodDark);
         Box(hinge.transform, "Knob", new Vector3(doorW - 0.14f, baseH + 1.0f, 0.05f), new Vector3(0.06f, 0.06f, 0.04f), GreyboxWorld.Mat(new Color(0.55f, 0.5f, 0.4f), 0.6f));
         hinge.AddComponent<Door>();
 
@@ -255,7 +258,7 @@ public static class VillageLook
         var l = lightGo.AddComponent<Light>();
         l.type = LightType.Point;
         l.range = 8f;
-        l.intensity = 1.35f;
+        l.intensity = 2.4f;
         l.color = new Color(1f, 0.78f, 0.55f);
         l.shadows = LightShadows.None;
     }
@@ -302,17 +305,13 @@ public static class VillageLook
         Box(root, "Frame", new Vector3(cx + hw, cy, face), new Vector3(0.07f, hh * 2f, 0.06f), wood);
         Box(root, "Frame", new Vector3(cx, cy + hh, face), new Vector3(hw * 2f, 0.07f, 0.06f), wood);
         Box(root, "Frame", new Vector3(cx, cy - hh, face), new Vector3(hw * 2f + 0.08f, 0.06f, 0.1f), wood);
-        bool boarded = rng != null && rng.Next(5) == 0;
-        if (boarded)
-        {
-            var a = Box(root, "Board", new Vector3(cx, cy, face), new Vector3(hw * 1.7f, 0.1f, 0.04f), wood);
-            a.transform.localRotation = Quaternion.Euler(0f, 0f, 38f);
-            var b = Box(root, "Board", new Vector3(cx, cy, face - 0.02f), new Vector3(hw * 1.7f, 0.1f, 0.04f), wood);
-            b.transform.localRotation = Quaternion.Euler(0f, 0f, -38f);
-            return;
-        }
-        Box(root, "Glass", new Vector3(cx, cy, face + (z < 0f ? 0.03f : -0.03f)), new Vector3(hw * 2f - 0.1f, hh * 2f - 0.1f, 0.02f), glass);
+        Box(root, "Glass", new Vector3(cx, cy, face + (z < 0f ? 0.03f : -0.03f)), new Vector3(hw * 2.05f, hh * 2.05f, 0.03f), glass);
         Box(root, "Mullion", new Vector3(cx, cy, face), new Vector3(0.045f, hh * 2f - 0.1f, 0.05f), wood);
+        if (rng != null && rng.Next(7) == 0)
+        {
+            for (int i = -1; i <= 1; i++)
+                Box(root, "Board", new Vector3(cx, cy + i * hh * 0.62f, face), new Vector3(hw * 2.1f, hh * 0.78f, 0.05f), wood);
+        }
     }
 
     static void WindowSide(Transform root, float x, float cz, float cy, float hw, float hh, Material wood, Material glass, System.Random rng)
@@ -322,14 +321,12 @@ public static class VillageLook
         Box(root, "Frame", new Vector3(face, cy, cz + hw), new Vector3(0.06f, hh * 2f, 0.07f), wood);
         Box(root, "Frame", new Vector3(face, cy + hh, cz), new Vector3(0.06f, 0.07f, hw * 2f), wood);
         Box(root, "Frame", new Vector3(face, cy - hh, cz), new Vector3(0.1f, 0.06f, hw * 2f + 0.08f), wood);
-        bool boarded = rng != null && rng.Next(5) == 0;
-        if (boarded)
+        Box(root, "Glass", new Vector3(face + (x < 0f ? 0.03f : -0.03f), cy, cz), new Vector3(0.03f, hh * 2.05f, hw * 2.05f), glass);
+        if (rng != null && rng.Next(7) == 0)
         {
-            var a = Box(root, "Board", new Vector3(face, cy, cz), new Vector3(0.04f, 0.1f, hw * 1.7f), wood);
-            a.transform.localRotation = Quaternion.Euler(38f, 0f, 0f);
-            return;
+            for (int i = -1; i <= 1; i++)
+                Box(root, "Board", new Vector3(face, cy, cz + i * hw * 0.62f), new Vector3(0.05f, hh * 0.78f, hw * 2.1f), wood);
         }
-        Box(root, "Glass", new Vector3(face + (x < 0f ? 0.03f : -0.03f), cy, cz), new Vector3(0.02f, hh * 2f - 0.1f, hw * 2f - 0.1f), glass);
     }
 
     static void Roof(Transform root, float hx, float hz, float wallTop, float oh, float pitch, Material tiles, Material wood)
@@ -568,7 +565,7 @@ public static class VillageLook
 
     public static void Lamp(Vector3 pos, float yaw)
     {
-        var scanned = PropKit.Spawn("Poly/street_lamp_01/street_lamp_01_1k", pos, Quaternion.Euler(0f, yaw, 0f), 3.87f, true);
+        var scanned = PropKit.Spawn("Poly/street_lamp_01/street_lamp_01_1k", pos, Quaternion.Euler(0f, yaw, 0f), 3.87f, false);
         if (scanned != null) return;
         var root = new GameObject("Lamp").transform;
         root.position = pos;
@@ -590,7 +587,7 @@ public static class VillageLook
         var rock = GameObject.CreatePrimitive(PrimitiveType.Sphere);
         rock.name = "Rock";
         rock.transform.position = pos + Vector3.up * (0.18f * scale);
-        rock.transform.rotation = Quaternion.Euler(0f, yaw, 8f);
+        rock.transform.rotation = Quaternion.Euler(0f, yaw, 0f);
         rock.transform.localScale = new Vector3(1.1f, 0.55f, 0.85f) * scale;
         var mat = GreyboxWorld.Photo("Ground037", new Vector2(1.2f, 1.2f), new Color(0.55f, 0.52f, 0.48f))
             ?? GreyboxWorld.Mat(new Color(0.35f, 0.34f, 0.32f), 0.08f);
@@ -601,19 +598,7 @@ public static class VillageLook
     static Material Glass()
     {
         if (glassMat != null) return glassMat;
-        glassMat = GreyboxWorld.Mat(new Color(0.62f, 0.78f, 0.84f, 0.28f), 0.92f);
-        var c = new Color(0.55f, 0.75f, 0.82f, 0.28f);
-        if (glassMat.HasProperty("_BaseColor")) glassMat.SetColor("_BaseColor", c);
-        glassMat.color = c;
-        glassMat.SetFloat("_Surface", 1f);
-        glassMat.SetFloat("_Blend", 0f);
-        glassMat.SetOverrideTag("RenderType", "Transparent");
-        glassMat.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
-        glassMat.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
-        glassMat.SetInt("_ZWrite", 0);
-        glassMat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-        glassMat.DisableKeyword("_ALPHATEST_ON");
-        glassMat.renderQueue = (int)RenderQueue.Transparent;
+        glassMat = GreyboxWorld.Mat(new Color(0.42f, 0.52f, 0.56f), 0.55f);
         return glassMat;
     }
 
@@ -625,7 +610,26 @@ public static class VillageLook
         g.transform.localPosition = localPos;
         g.transform.localRotation = Quaternion.identity;
         g.transform.localScale = localScale;
-        g.GetComponent<Renderer>().sharedMaterial = mat;
+        var rend = g.GetComponent<Renderer>();
+        var tiled = new Material(mat);
+        float tile = 1.4f;
+        Vector2 st;
+        if (localScale.y <= localScale.x && localScale.y <= localScale.z)
+            st = new Vector2(localScale.x / tile, localScale.z / tile);
+        else if (localScale.x <= localScale.y && localScale.x <= localScale.z)
+            st = new Vector2(localScale.z / tile, localScale.y / tile);
+        else
+            st = new Vector2(localScale.x / tile, localScale.y / tile);
+        st.x = Mathf.Max(0.2f, st.x);
+        st.y = Mathf.Max(0.2f, st.y);
+        tiled.mainTextureScale = st;
+        if (tiled.HasProperty("_BaseMap")) tiled.SetTextureScale("_BaseMap", st);
+        rend.sharedMaterial = tiled;
+        if (name == "Yard" || name == "Path" || name == "Glass" || name == "Board" || name == "Frame" || name == "Mullion" || name == "Fascia" || name == "Ridge" || name == "Awning")
+        {
+            var col = g.GetComponent<Collider>();
+            if (col != null) PropKit.Release(col);
+        }
         return g;
     }
 

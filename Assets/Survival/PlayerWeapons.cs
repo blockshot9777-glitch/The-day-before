@@ -15,6 +15,7 @@ public class PlayerWeapons : MonoBehaviour
     float nextShot;
     bool reloading;
     float reloadT;
+    float swing;
 
     public static Vector3 LastNoise;
     public static float LastNoiseTime = -99f;
@@ -55,7 +56,8 @@ public class PlayerWeapons : MonoBehaviour
         if (slot == 0)
         {
             nextShot = Time.time + 0.45f;
-            Hit(2.1f, 22f, false);
+            swing = 0.16f;
+            Hit(2.6f, 34f, false);
             return;
         }
         if (mag <= 0)
@@ -75,15 +77,40 @@ public class PlayerWeapons : MonoBehaviour
     {
         Vector3 origin = eyes.transform.position;
         Vector3 dir = eyes.transform.forward;
-        if (gun) dir = Quaternion.Euler(Random.Range(-1.2f, 1.2f), Random.Range(-1.2f, 1.2f), 0f) * dir;
-        if (!Physics.Raycast(origin, dir, out RaycastHit hit, range, ~0, QueryTriggerInteraction.Ignore)) return;
-        var door = hit.collider.GetComponentInParent<Door>();
+        if (gun) dir = Quaternion.Euler(Random.Range(-0.5f, 0.5f), Random.Range(-0.5f, 0.5f), 0f) * dir;
+        // The camera sits inside the body capsule, so a raw ray always hits the player first.
+        float radius = gun ? 0.03f : 0.4f;
+        var hits = Physics.SphereCastAll(origin, radius, dir, range, ~0, QueryTriggerInteraction.Ignore);
+        if (!TryPick(hits, out var best)) return;
+        var door = best.collider.GetComponentInParent<Door>();
         if (door != null) door.Hit(damage);
-        var z = hit.collider.GetComponentInParent<Zombie>();
+        var z = best.collider.GetComponentInParent<Zombie>();
         if (z == null) return;
-        float dmg = damage;
-        if (hit.collider.name == "Head") dmg *= 2.3f;
-        z.Hurt(dmg);
+        z.Hurt(damage * DamageScale(best.collider.name));
+    }
+
+    // The camera sits inside the body, so the player's own capsule is usually the first hit.
+    public static bool TryPick(RaycastHit[] hits, out RaycastHit best)
+    {
+        bool any = false;
+        best = default;
+        float bestD = float.MaxValue;
+        if (hits == null) return false;
+        foreach (var hit in hits)
+        {
+            if (hit.collider == null) continue;
+            if (hit.collider.GetComponentInParent<PlayerMotor>() != null) continue;
+            if (hit.distance >= bestD) continue;
+            bestD = hit.distance;
+            best = hit;
+            any = true;
+        }
+        return any;
+    }
+
+    public static float DamageScale(string colliderName)
+    {
+        return colliderName == "Head" ? 2.3f : 1f;
     }
 
     void StartReload()
@@ -108,7 +135,14 @@ public class PlayerWeapons : MonoBehaviour
         foreach (Transform c in viewModel) c.gameObject.SetActive(false);
         string show = slot == 1 ? "Pistol" : "Knife";
         var t = viewModel.Find(show);
-        if (t != null) t.gameObject.SetActive(true);
+        if (t == null) return;
+        t.gameObject.SetActive(true);
+        if (show != "Knife") return;
+        if (swing > 0f) swing -= Time.deltaTime;
+        float u = swing > 0f ? 1f - swing / 0.16f : 1f;
+        var rest = Quaternion.Euler(90f, -8f, -18f);
+        var strike = Quaternion.Euler(48f, -24f, -62f);
+        t.localRotation = Quaternion.Slerp(rest, strike, swing > 0f ? Mathf.Sin(u * Mathf.PI) : 0f);
     }
 
     public string AmmoLabel()
